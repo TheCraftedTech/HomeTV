@@ -20,8 +20,8 @@ android {
         applicationId = "de.thecraftedtech.hometv"
         minSdk = 22          // Fire OS 5 (Android 5.1) und neuer
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         buildConfigField("String", "FRITZBOX_HOST", "\"$fritzboxHost\"")
 
@@ -70,6 +70,17 @@ android {
         resources.excludes += setOf("META-INF/*.version", "META-INF/LICENSE*", "META-INF/NOTICE*")
     }
 }
+
+// Senderliste als Rueckfallkopie mitliefern: tests/data/tv.m3u (wenn vorhanden) -> assets/tv.m3u.
+// Die App laedt die Liste zuerst live von der FRITZ!Box; diese Kopie wird nur genutzt, wenn die Box nicht erreichbar ist.
+val copyChannelList = tasks.register<Copy>("copyChannelList") {
+    from(rootProject.file("tests/data/tv.m3u"))
+    into(layout.buildDirectory.dir("generated/hometv-assets"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/hometv-assets"))
+tasks.matching {
+    (it.name.startsWith("merge") && it.name.endsWith("Assets")) || it.name.contains("lint", ignoreCase = true)
+}.configureEach { dependsOn(copyChannelList) }
 
 dependencies {
     // Offizielle LibVLC-Android-Bibliothek (LGPL 2.1), stabile 3.x-Reihe

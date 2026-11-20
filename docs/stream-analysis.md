@@ -164,3 +164,81 @@ Gemessen am 2026-11-20:
    der TS-Bytes an einen ExoPlayer-DataSource liefert, oder
 4. LibVLC (VLC-Engine, SAT>IP/RTSP + AC-3 in Software).
 Details und Entscheidung: `docs/player-architecture.md` (Phase 2).
+
+## 12. Phase 3: Messungen zu UDP, Jitter, Zeitstempeln und Stream-Start
+
+Alle Messungen vom Laptop (WLAN, `192.168.1.30`) mit den Werkzeugen `tools/udp_analyze.py`, `tools/ts_sync_check.py`,
+`tools/ts_cc_events.py` (nur Standardbibliothek, rein lesend, sauberes TEARDOWN). Rohdaten (nicht in Git) in `tests/data/`.
+**Das ist ausdrücklich nicht der Fire TV** – die entsprechenden Fire-TV-Messwerte liefert die neue App (Overlay + Log).
+Die Angabe „UniFi Gateway" stammt von dir; ich habe das Gateway nicht angemeldet untersucht (Router 192.168.1.1 ist der erste Hop).
+
+### 12.1 UDP/RTP-Pfad (Box → Gateway → Laptop)
+
+| Messung | Ergebnis |
+|---|---|
+| Das Erste HD, 300 s | 296 832 RTP-Pakete, **0 verloren, 0 umsortiert, 0 doppelt**, 0 TS-Fehler, 10,4 Mbit/s |
+| Das Erste HD, 120 s (Roh-Mitschnitt) | 100 192 Pakete, **0 verloren**, 2 umsortiert (Distanz klein), 0 doppelt |
+| 6 Muxe × 100 s (386/394/402/418/450/474 MHz) | **0 RTP-Verluste auf allen sechs**, 6,2–9,4 Mbit/s |
+| Ankunftsabstand (300 s) | Median 0,02 ms, p95 5,9 ms, p99 10,1 ms, **max 31,4 ms**; keine Lücke > 50 ms |
+| Empfangsrate je Sekunde | 5,6 … 15,5 Mbit/s (stark variabel: VBR, I-Frame-Bursts), σ = 1,8 Mbit/s |
+| PCR-Jitter (Ankunft gegen PCR, Mux-Takt) | p50 7,6 ms · p95 13,2 ms · p99 19,9 ms · p99,9 28,6 ms · **max 33,9 ms** (ZDFneo: p99 48 ms, arte: 30 ms) |
+| Taktdrift Box ↔ Client | +9,3 ppm (300 s), +9,8 ppm (120 s) → ≈ 32 ms pro Stunde |
+
+**Folgerung:** Auf dem gemessenen Pfad gibt es weder Paketverlust noch relevantes Reordering. Der gesamte Netzwerk-Jitter
+bleibt unter ca. 50 ms. Ein Puffer von 3–5 s ist **für das Netzwerk nicht nötig**; er würde nur die Live-Verzögerung erhöhen.
+(Er kann trotzdem sinnvoll sein, wenn auf dem Fire TV Decoder-/CPU-Stalls auftreten – das lässt sich nur dort messen.)
+Der Router lässt – wie in Abschnitt 11 gezeigt – RTP nur nach einem Punch-Paket durch (zustandsbehaftete Firewall/NAT); mit Punch und
+Wiederholung alle 5 s lief der Pfad in allen Läufen ohne Unterbrechung. Einstellungen am Gateway sind dafür **nicht** nötig.
+
+Hinweis zu Bursts: Die Rate schwankt bis 15,5 Mbit/s; ein Empfangs-Socket muss das Maximum aushalten. Auf Android ist der
+Socket-Puffer durch `net.core.rmem_max` begrenzt; die App fordert 4 MiB an, **misst den gewährten Wert** und zeigt ihn im Overlay
+(`UDP-Puffer`), liest in einem Thread mit hoher Priorität und gibt die Daten über einen elastischen Puffer an LibVLC weiter.
+
+### 12.2 Zeitstempel im MPEG-TS (Audio/Video-Synchronisation der Quelle)
+
+Roh-Mitschnitt Das Erste HD, 120 s, Original-PCR/PTS (`tools/ts_sync_check.py`):
+
+| PID | Spur | PTS − PCR bei Ankunft (min / Median / max) | PTS-Auffälligkeiten |
+|---|---|---|---|
+| 5101 | Video H.264 (PCR-PID) | 257 / 702 / 938 ms | 1 Sprung in 5993 PES |
+| 5102 | Audio AC-3 (Hauptton) | **58** / 80 / 100 ms | keine (Schritt 192 ms je PES) |
+| 5103 | Audio AC-3 | 133 / 152 / 171 ms | keine |
+| 5107 | Audio AC-3 | 131 / 151 / 171 ms | keine |
+
+- Audio und Video tragen **gemeinsame PTS auf der PCR-Zeitbasis**; die Quelle ist in sich synchron (keine PTS-Sprünge im Audio).
+- Das Video wird im Mux **550–620 ms früher** gesendet, als es dem Audio entspricht; der Hauptton kommt nur **58–100 ms vor seiner
+  Wiedergabezeit** an. Konsequenz: Der Player muss alle Spuren an der PCR-Uhr ausrichten und mindestens den Jitter (≤ 50 ms) plus
+  die Audio-Vorausschau (58 ms) abdecken – **jede zusätzliche Verzögerung, die nur das Audio trifft, erzeugt sofort Versatz**.
+  Das spricht dafür, die Synchronisation LibVLC zu überlassen (PCR-Uhr), keine getrennten Puffer für Audio und Video einzubauen
+  und nur einen **einheitlichen** Eingangspuffer (`network-caching`/`tcp-caching`) zu verwenden.
+- Ein Mindest-Eingangspuffer von etwa 200–300 ms genügt der Quelle; VLC-Standard 1000 ms hat reichlich Reserve.
+
+### 12.3 Fehlende TS-Pakete: nur beim Stream-Start
+
+TS-Continuity-Fehler (= fehlende TS-Pakete im Strom, obwohl alle RTP-Pakete ankamen, also **vor dem Netzwerk** entstanden):
+
+| Mux | Fehler gesamt (100 s) | davon in den ersten ~1 s | danach |
+|---|---|---|---|
+| 386 Das Erste HD (120 s-Mitschnitt) | 12 | 12 (bei 0,0 s und 0,93 s) | **0** |
+| 386 Das Erste HD (300 s / 100 s Läufe) | 0 / 0 | – | 0 |
+| 402 MDR Sachsen HD (90 s Mitschnitt) | 9 | 9 (bei 0,93 s) | **0** |
+| 474 ZDFneo HD (90 s Mitschnitt) | 0 | – | 0 |
+| 394 tagesschau24 / 418 arte / 450 ZDF | 6 / 9 / 0 | (nicht zeitlich aufgelöst; gleiches Muster erwartet) | – |
+
+- Der laufende Strom ist sauber (0 Fehler über Minuten); **bei 6 von 10 gemessenen Stream-Starts** enthält der Strom aber kurz nach dem Start
+  (in den zeitlich aufgelösten Fällen bei ≈ 0,93 s nach dem ersten PCR, auf zwei verschiedenen Muxen) Lücken in mehreren PIDs inkl. Video; 4 Starts blieben fehlerfrei.
+  Ein Decoder, der sofort einsteigt, kann dann auf einem beschädigten ersten GOP beginnen → mögliche **Blockbildung beim Einschalten/Senderwechsel**.
+- Gegenmaßnahme in der App (**Start-Gate**, `SatIpSession`): Daten gehen erst an LibVLC, wenn ≥ 1,2 s seit dem ersten Paket vergangen
+  sind **und** 0,5 s lang kein TS-Fehler mehr auftrat (spätestens nach 3 s). Kosten: ca. 1,2 s zusätzliche Startzeit pro Sender.
+- Der Tuner meldet während der Läufe Pegel 100–106/255, Lock = 1, **Qualität 13/15** (DESCRIBE auf die Stream-URL, `tuner=`-Feld);
+  der frühere Leerlaufwert „240 / 7" aus Abschnitt 4 gehört zu einem unbenutzten Tuner und sagt nichts über den Empfang.
+  Die Kabelqualität ist laut diesen Werten unauffällig.
+
+### 12.4 Was daraus (nicht) folgt
+
+- Die vom Nutzer beobachteten gelegentlichen Sprünge/Blöcke **mitten** in der Wiedergabe sind mit diesen Messungen **nicht** durch
+  Quelle, Kabel oder Netzwerk (Laptop-Pfad) erklärbar. Offen bleiben Ursachen auf dem Fire TV: Empfangssocket/Thread, lokale Übergabe an
+  LibVLC (UDP-Loopback kann überlaufen), Hardware-Decoder, A/V-Uhr in LibVLC, WLAN/Ethernet-Pfad des Fire TV.
+- Die App erfasst deshalb jetzt getrennt: RTP-Verluste/Reordering (Netz), TS-Fehler im gelieferten Strom (Quelle/Netz),
+  Feed-Überlauf (lokal) und LibVLC-Zähler (`demuxCorrupted`, `demuxDiscontinuity`, `lostPictures`, `lostAbuffers`). Aus dem Vergleich dieser
+  Zahlen im Log (`STATS`-Zeilen alle 10 s) folgt, **wo** ein Fehler entsteht.

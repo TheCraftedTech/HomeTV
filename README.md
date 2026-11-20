@@ -3,16 +3,15 @@
 Native Android-App (Kotlin, LibVLC) für **Amazon Fire TV**, die Live-TV direkt von einer **FRITZ!Box 6660 Cable**
 (DVB-C, SAT>IP) wiedergibt – ohne zusätzlichen Streamingserver und ohne Transkodierung.
 
-**Stand: Prototyp 1.0.0.** Die App öffnet beim Start direkt *Das Erste HD*. Keine Senderliste, kein EPG, keine Favoriten.
+**Stand: Version 1.1.0 (Versionscode 2).** Die App öffnet beim Start *Das Erste HD* und wechselt mit **CH+/CH−** (Keycode 166/167) durch alle 97 Sender der FRITZ!Box-Liste. Kein EPG, keine Favoriten, keine Senderliste-Oberfläche.
 Entwickelt von Samuel · Paket `de.thecraftedtech.hometv`.
 
-> ⚠️ **Teststatus:** gebaut ✅ · Stream/Client am Laptop gegen die echte Box getestet ✅ ·
-> **auf dem Fire TV installiert/abgespielt: noch nicht getestet** ⬜ (siehe „Teststatus").
+> ⚠️ **Teststatus:** Version 1.0.0 lief auf dem Fire TV (Das Erste HD mit Bild und Ton). **Version 1.1.0 ist gebaut und am Laptop getestet, aber noch nicht auf dem Fire TV** (siehe „Teststatus").
 
 ## So funktioniert es (kurz)
 Die FRITZ!Box stellt ihre Sender als **SAT>IP** bereit: RTSP (Port 554) + RTP/UDP mit MPEG-TS (H.264 + AC-3).
-Die Senderliste (`http://<box>/dvb/m3u/tvhd.m3u`) liefert die Stream-Adressen. Ein kleiner eigener SAT>IP-Client in der App
-(Handshake, NAT-Punch, Keep-Alive, sauberes TEARDOWN) reicht den TS-Strom lokal an **LibVLC** weiter, das Bild und Ton ausgibt.
+Die Senderlisten (`http://<box>/dvb/m3u/tvhd.m3u` + `tvsd.m3u`) liefern die Stream-Adressen. Ein kleiner eigener SAT>IP-Client in der App
+(Handshake, NAT-Punch, Keep-Alive, Paket-Resequenzierung, Start-Gate, sauberes TEARDOWN) reicht den TS-Strom lokal (TCP-Loopback mit Rückstau, alternativ UDP) an **LibVLC** weiter, das Bild und Ton ausgibt und Audio/Video über die PCR-Uhr synchronisiert.
 Details: [docs/player-technology.md](docs/player-technology.md), Messungen: [docs/stream-analysis.md](docs/stream-analysis.md).
 
 ## Voraussetzungen
@@ -32,7 +31,7 @@ Details und Signierschlüssel: [docs/build-and-install.md](docs/build-and-instal
 scripts\test-adb.bat             (Verbindung prüfen, installiert nichts)
 scripts\install-firetv.bat       (adb install -r; IP aus firetv-ip.txt)
 ```
-Start: Fire TV → Apps → **Home TV**. Fernbedienung: OK = Info-Overlay, Play/Pause, Zurück = schließen/beenden, Menü = Modus wechseln.
+Start: Fire TV → Apps → **Home TV**. Fernbedienung: CH+/CH− = Sender wechseln, OK = Info-Overlay (▲▼ Puffer, ◀▶ Audio-Versatz), Play/Pause, Menü = Übergabemodus, Zurück = schließen/beenden – Tabelle in [docs/firetv-setup.md](docs/firetv-setup.md).
 Eine genaue Anleitung samt Checkliste für den Fernseher: [docs/build-and-install.md](docs/build-and-install.md).
 
 ## Netzwerk-Konfiguration
@@ -48,6 +47,10 @@ Eine genaue Anleitung samt Checkliste für den Fernseher: [docs/build-and-instal
 |---|---|
 | `scripts/test-stream.py` | M3U lesen, Das Erste HD finden, RTSP prüfen, optional ffplay (`--play`). Nur Standardbibliothek. |
 | `tools/rtsp_probe.py` | roher RTSP-Dialog gegen die Box (`udp\|tcp`, `punch`) – zur Fehlersuche |
+| `tools/udp_analyze.py` | UDP/RTP/TS-Messung: Verlust, Reordering, Jitter (PCR), Tuner-Status, TS-Fehler; `--dump` schreibt den Roh-TS |
+| `tools/ts_sync_check.py`, `tools/ts_cc_events.py` | Audio/Video-Zeitstempel (PTS − PCR) bzw. Zeitpunkt von TS-Fehlern im Roh-Mitschnitt |
+| `tools/make_icons.ps1` | erzeugt Banner, Launcher-Icon und Adaptive-Icon-Vordergrund (ffmpeg) |
+| `scripts/pull-log.bat` | holt App-Log (STATS alle 10 s), logcat und UDP-Zähler vom Fire TV (rein lesend) |
 | `app/src/test/.../LiveSatIpTest.kt` | Integrationstest gegen die echte Box (`HOMETV_LIVE_TEST=1`) |
 
 Beispiele: `.venv\Scripts\python.exe scripts\test-stream.py --play`
@@ -55,22 +58,25 @@ Beispiele: `.venv\Scripts\python.exe scripts\test-stream.py --play`
 ## Teststatus (ehrlich getrennt)
 | Ebene | Status |
 |---|---|
-| Auf dem Laptop getestet (ffmpeg/ffplay, 120 s) | ✅ Bild + Ton, stabil im sauberen Lauf |
-| SAT>IP-Client-Code gegen die echte Box (JVM, 30 s, TEARDOWN) | ✅ |
-| Erfolgreich gebaut (signierte Release-APK) | ✅ `build\HomeTV.apk` |
-| Auf dem Fire TV installiert | ⬜ nicht durchgeführt (erst nach deiner Freigabe) |
-| Auf dem Fire TV wiedergegeben (Bild, Ton, Fernbedienung, Dauerlauf, HW-Dekodierung) | ⬜ **offen** |
-| VLC-App auf dem Fire TV als Vergleich | ⬜ offen (VLC 3.6.5 ist installiert) |
+| Version 1.0.0 auf dem Fire TV: Das Erste HD mit Bild und Ton | ✅ (vom Nutzer bestätigt); leichte A/V-Asynchronität und gelegentliche Blöcke beobachtet |
+| Version 1.1.0: signierte Release-APK gebaut | ✅ `build\HomeTV.apk` |
+| Unit-Tests (Resequenzer, TS-Inspektor, Playlist) | ✅ 16 Tests |
+| SAT>IP-Client 1.1 gegen die echte Box (40 s, Laptop) | ✅ 0 verloren, 0 TS-Fehler, TEARDOWN 124 ms |
+| Netz-/Zeitstempelmessungen (Laptop, WLAN) | ✅ siehe `docs/stream-analysis.md`, Abschnitt 12 |
+| Version 1.1.0 auf dem Fire TV installiert | ⬜ offen (nur nach deiner Freigabe) |
+| Senderwechsel, TCP-Loopback, Puffer, Audio-Versatz, Hardware-Decoder, A/V-Sync, Dauerlauf auf dem Fire TV | ⬜ **offen** |
+| Darstellung des neuen App-Icons/Banners in der Fire-TV-Oberfläche | ⬜ offen |
 
 ## Bekannte Einschränkungen
-- Nur *Das Erste HD*; Senderwechsel, Senderliste, EPG folgen erst nach der ersten erfolgreichen Wiedergabe.
+- Keine Senderlisten-Oberfläche, kein EPG, keine Favoriten; Senderwechsel nur sequentiell (CH+/CH−, ▲▼).
+- Die Standard-Fire-TV-Fernbedienung hat keine CH-Tasten; deshalb gelten ▲/▼ als Alias (bei geöffnetem Overlay stellen sie den Puffer ein).
 - Pause = Standbild; Fortsetzen startet den Stream live neu (kein Timeshift).
 - Mehrere Tonspuren/Audiodeskription/Untertitel sind nicht auswählbar.
-- Hardwarebeschleunigung wird angefordert, ob sie aktiv ist, ist noch nicht verifiziert.
+- Hardwarebeschleunigung wird angefordert; ob sie aktiv ist, zeigt das Overlay („Decoder") – Auswertung per Log-Heuristik, auf dem Gerät noch nicht geprüft.
+- Nach dem Einschalten/Senderwechsel ≈ 1,2 s zusätzliche Startzeit (Start-Gate) plus Puffer.
 - Die Box kann nur eine begrenzte Zahl gleichzeitiger Streams; verwaiste Sessions laufen nach 60 s ab.
 - Release ohne Code-Verkleinerung (R8 aus), APK ca. 46 MB wegen LibVLC (zwei ABIs).
 - LibVLC steht unter LGPL 2.1 – bei Weitergabe der APK Lizenzhinweis beilegen.
-
 ## Projektstruktur
 ```
 app/        Android-Modul (Kotlin)         docs/      Dokumentation

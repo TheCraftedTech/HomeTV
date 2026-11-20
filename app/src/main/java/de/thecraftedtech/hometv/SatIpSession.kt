@@ -1,6 +1,5 @@
 package de.thecraftedtech.hometv
 
-import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.DatagramPacket
@@ -11,6 +10,24 @@ import java.net.Socket
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+
+/** Momentaufnahme der Messwerte einer SAT>IP-Session (alles echte Zaehler, keine Schaetzungen). */
+data class NetStats(
+    val packets: Long,          // empfangene RTP-Pakete
+    val bytes: Long,            // empfangene TS-Nutzdaten
+    val lost: Long,             // endgueltig fehlende RTP-Pakete (Sequenzluecken)
+    val reordered: Long,        // rechtzeitig einsortierte, vertauschte Pakete
+    val lateOrDuplicate: Long,  // zu spaet/doppelt eingetroffen, verworfen
+    val tsPackets: Long,        // an den Player gelieferte TS-Pakete
+    val tsCcErrors: Long,       // Continuity-Counter-Fehler im gelieferten Strom (= fehlende TS-Pakete)
+    val tsBadSync: Long,
+    val jitterMs: Double,       // RFC-3550-Jitter (Ankunft gegen RTP-Zeitstempel, 90 kHz)
+    val rcvBufBytes: Int,       // tatsaechlich gewaehrter UDP-Empfangspuffer
+    val dataTimeMs: Long,       // PCR-Datenzeit seit Start
+    val feedQueued: Long,       // Bytes, die auf LibVLC warten
+    val feedOverflow: Long,     // Bytes, die wegen vollem App-Puffer verworfen wurden
+    val msSinceLastPacket: Long,
+)
 
 /**
  * Minimaler SAT>IP-/RTSP-Client fuer die FRITZ!Box (gemessen in docs/stream-analysis.md).
@@ -23,11 +40,11 @@ import java.util.concurrent.atomic.AtomicLong
  *  - Sauberes TEARDOWN ist wichtig, verwaiste Sessions stoerten die Box in den Tests.
  *
  * Ablauf: OPTIONS -> DESCRIBE -> SETUP (UDP) -> Punch -> PLAY rtsp://host/stream=ID -> RTP empfangen,
- * RTP-Header entfernen und den MPEG-TS-Inhalt per Loopback-UDP an den lokalen Player weiterreichen.
+ * in Sequenzreihenfolge bringen, RTP-Header entfernen und den MPEG-TS-Inhalt an den [LocalFeed] (-> LibVLC) geben.
  */
 class SatIpSession(
     private val rtspUrl: String,
-    private val localTsPort: Int,
+    private val feed: LocalFeed,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -40,12 +57,55 @@ class SatIpSession(
     private val running = AtomicBoolean(false)
     @Volatile private var worker: Thread? = null
 
-    // Statistik fuer das Info-Overlay
-    val bytesReceived = AtomicLong()
-    val packetsReceived = AtomicLong()
-    val packetsLost = AtomicLong()
-    @Volatile var lastPacketAtMs: Long = 0L
-        private set
+    private val packetsRx = AtomicLong()
+    private val bytesRx = AtomicLong()
+    @Volatile private var lastPacketAtMs = 0L
+    @Volatile private var jitterMs = 0.0
+    @Volatile private var rcvBuf = 0
+    private val maxGapWindowMs = AtomicLong()
+
+    private val inspector = TsInspector()
+
+    // Start-Gate: Messungen (docs/stream-analysis.md) zeigen, dass der Stream-Start der FRITZ!Box (6 von 10 gemessenen Starts) in den ersten ~1 s
+    // fehlende TS-Pakete enthaelt (Continuity-Fehler bei ~0 s und ~0,93 s nach dem ersten PCR), danach 0. Damit der Decoder
+    // nicht auf einem beschaedigten ersten GOP beginnt, wird erst weitergereicht, wenn die Startphase ruhig ist:
+    // mindestens GATE_MIN_MS seit dem ersten Datenpaket UND GATE_QUIET_MS ohne TS-Fehler, spaetestens nach GATE_MAX_MS.
+    private var gateOpen = false
+    private var gateFirstAtMs = 0L
+    private var gateLastErrAtMs = 0L
+    @Volatile var gateOpenedAfterMs = -1L; private set
+    private val gateDropped = AtomicLong()
+    val gateDroppedBytes: Long get() = gateDropped.get()
+
+    private val resequencer = RtpResequencer { b, o, l ->
+        val errBefore = inspector.ccErrors
+        inspector.inspect(b, o, l)
+        val now = System.currentTimeMillis()
+        if (!gateOpen) {
+            if (gateFirstAtMs == 0L) gateFirstAtMs = now
+            if (inspector.ccErrors != errBefore) gateLastErrAtMs = now
+            val age = now - gateFirstAtMs
+            if ((age >= GATE_MIN_MS && now - gateLastErrAtMs >= GATE_QUIET_MS) || age >= GATE_MAX_MS) {
+                gateOpen = true
+                gateOpenedAfterMs = age
+                AppLog.i(tag, "Start-Gate offen nach $age ms (verworfen: ${gateDropped.get() / 1024} KiB, TS-Fehler in der Startphase: ${inspector.ccErrors})")
+            }
+        }
+        if (gateOpen) feed.write(b, o, l) else gateDropped.addAndGet(l.toLong())
+    }
+
+    val lastPacketAgoMs: Long get() = if (lastPacketAtMs == 0L) -1 else System.currentTimeMillis() - lastPacketAtMs
+
+    fun stats() = NetStats(
+        packets = packetsRx.get(), bytes = bytesRx.get(), lost = resequencer.lost, reordered = resequencer.reordered,
+        lateOrDuplicate = resequencer.lateOrDuplicate, tsPackets = inspector.tsPackets, tsCcErrors = inspector.ccErrors,
+        tsBadSync = inspector.badSync, jitterMs = jitterMs, rcvBufBytes = rcvBuf, dataTimeMs = inspector.dataTimeMs,
+        feedQueued = feed.queuedBytes, feedOverflow = feed.overflowBytes,
+        msSinceLastPacket = if (lastPacketAtMs == 0L) -1 else System.currentTimeMillis() - lastPacketAtMs,
+    )
+
+    /** Groesste Ankunftsluecke seit dem letzten Aufruf (ms). */
+    fun takeMaxGapMs(): Long = maxGapWindowMs.getAndSet(0)
 
     private lateinit var host: String
     private var port = 554
@@ -134,7 +194,7 @@ class SatIpSession(
             // normales Beenden
         } catch (e: Exception) {
             if (running.get()) {
-                Log.e(tag, "Session-Fehler", e)
+                AppLog.e(tag, "Session-Fehler", e)
                 listener.onError(describe(e))
             }
         } finally {
@@ -161,8 +221,11 @@ class SatIpSession(
             val rtcp = try {
                 DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(rtp.localPort + 1)) }
             } catch (_: Exception) { rtp.close(); return@repeat }
-            rtp.soTimeout = 1000
-            runCatching { rtp.receiveBufferSize = 2 * 1024 * 1024 }
+            rtp.soTimeout = 50
+            // Android begrenzt den Wunsch auf net.core.rmem_max; der tatsaechliche Wert wird gemessen und angezeigt.
+            runCatching { rtp.receiveBufferSize = 4 * 1024 * 1024 }
+            rcvBuf = runCatching { rtp.receiveBufferSize }.getOrDefault(0)
+            AppLog.i(tag, "UDP-Empfangspuffer: $rcvBuf Bytes (angefordert 4194304), Port ${rtp.localPort}")
             rtpSocket = rtp
             rtcpSocket = rtcp
             return
@@ -179,21 +242,26 @@ class SatIpSession(
     }
 
     private fun receiveLoop() {
+        // Der Empfang darf nie hinter Decoder/UI zurueckfallen: sonst laeuft der Socket-Puffer ueber (= Bildfehler).
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
         val rtp = rtpSocket ?: return
         val buf = ByteArray(4096)
         val pkt = DatagramPacket(buf, buf.size)
-        val out = DatagramSocket()
-        val local = InetAddress.getByName("127.0.0.1")
-        var lastSeq = -1
         var first = true
+        var prevArrivalMs = 0.0
+        var prevRtpTs = 0L
+        var haveTs = false
         try {
             while (running.get()) {
                 try {
                     pkt.length = buf.size
                     rtp.receive(pkt)
                 } catch (_: java.net.SocketTimeoutException) {
+                    resequencer.tick(System.currentTimeMillis())
                     continue
                 }
+                val nowNs = System.nanoTime()
+                val nowMs = System.currentTimeMillis()
                 val len = pkt.length
                 if (len < 12 || ((buf[0].toInt() shr 6) and 3) != 2) continue // kein RTP v2
                 val cc = buf[0].toInt() and 0x0F
@@ -210,26 +278,31 @@ class SatIpSession(
                 if (payload <= 0) continue
 
                 val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
-                if (lastSeq >= 0) {
-                    val diff = (seq - lastSeq) and 0xFFFF
-                    if (diff in 2..1000) packetsLost.addAndGet((diff - 1).toLong())
-                }
-                lastSeq = seq
+                val rtpTs = ((buf[4].toLong() and 0xFF) shl 24) or ((buf[5].toLong() and 0xFF) shl 16) or
+                    ((buf[6].toLong() and 0xFF) shl 8) or (buf[7].toLong() and 0xFF)
 
-                packetsReceived.incrementAndGet()
-                bytesReceived.addAndGet(payload.toLong())
-                lastPacketAtMs = System.currentTimeMillis()
+                // Ankunftsstatistik: Jitter nach RFC 3550 (Ankunft gegen RTP-Zeitstempel, 90 kHz) und groesste Luecke
+                val arrivalMs = nowNs / 1_000_000.0
+                if (haveTs) {
+                    val gap = (arrivalMs - prevArrivalMs).toLong()
+                    if (gap > maxGapWindowMs.get()) maxGapWindowMs.set(gap)
+                    val dTs = ((rtpTs - prevRtpTs) and 0xFFFFFFFFL).toDouble() / 90.0
+                    val d = Math.abs((arrivalMs - prevArrivalMs) - dTs)
+                    if (d < 10_000) jitterMs += (d - jitterMs) / 16.0
+                }
+                prevArrivalMs = arrivalMs; prevRtpTs = rtpTs; haveTs = true
+
+                packetsRx.incrementAndGet()
+                bytesRx.addAndGet(payload.toLong())
+                lastPacketAtMs = nowMs
                 if (first) {
                     first = false
                     listener.onStreaming()
                 }
-                // MPEG-TS (Vielfache von 188 Byte) unveraendert an den lokalen Player
-                out.send(DatagramPacket(buf, off, payload, local, localTsPort))
+                resequencer.push(seq, buf, off, payload, nowMs)
             }
         } catch (e: Exception) {
-            if (running.get()) Log.w(tag, "RTP-Empfang beendet", e)
-        } finally {
-            out.close()
+            if (running.get()) AppLog.w(tag, "RTP-Empfang beendet: ${e.message}")
         }
     }
 
@@ -239,10 +312,16 @@ class SatIpSession(
         try {
             s.soTimeout = 1500
             request("TEARDOWN", playUrl.ifEmpty { rtspUrl })
-            Log.i(tag, "TEARDOWN gesendet")
+            AppLog.i(tag, "TEARDOWN gesendet")
         } catch (e: Exception) {
-            Log.w(tag, "TEARDOWN fehlgeschlagen: ${e.message}")
+            AppLog.w(tag, "TEARDOWN fehlgeschlagen: ${e.message}")
         }
+    }
+
+    companion object {
+        const val GATE_MIN_MS = 1200L
+        const val GATE_QUIET_MS = 500L
+        const val GATE_MAX_MS = 3000L
     }
 
     // ---------- RTSP-Grundfunktionen ----------
@@ -273,7 +352,7 @@ class SatIpSession(
         val s = ctrl ?: throw IOException("keine Steuerverbindung")
         cseq++
         val sb = StringBuilder()
-        sb.append("$method $target RTSP/1.0\r\nCSeq: $cseq\r\nUser-Agent: HomeTV/1.0\r\n")
+        sb.append("$method $target RTSP/1.0\r\nCSeq: $cseq\r\nUser-Agent: HomeTV/1.1\r\n")
         session?.let { sb.append("Session: $it\r\n") }
         sb.append(extra).append("\r\n")
         s.getOutputStream().apply { write(sb.toString().toByteArray(Charsets.US_ASCII)); flush() }
