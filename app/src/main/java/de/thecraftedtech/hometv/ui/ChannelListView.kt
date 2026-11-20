@@ -30,25 +30,33 @@ class ChannelListView(context: Context) : FrameLayout(context) {
     private val scroll = ScrollIndicator(context)
     private val title = context.label(18f, Ui.TEXT, bold = true)
     private val clock = context.label(15f, Ui.ACCENT_LIGHT, bold = true)
-    private val hint = context.label(12f, Ui.TEXT_DIM)
+    private val hint = context.label(12f, Ui.TEXT_DIM, lines = 2)
     private val timeFmt = DateFormat.getTimeInstance(DateFormat.SHORT, Locale.GERMANY)
 
     private var channels: List<Channel> = emptyList()
+    /** Angezeigte Sender (Indizes in [channels]) – bei aktivem Favoriten-Filter nur die Favoriten. */
+    private var shown: List<Int> = emptyList()
     private var playingIndex = -1
+    /** Position der Auswahl in der angezeigten Liste. */
     var selected = 0
         private set
+    /** Index des ausgewaehlten Senders in der vollstaendigen Senderliste (-1 = keiner). */
+    val selectedChannel: Int get() = shown.getOrElse(selected) { -1 }
+    var isFavorite: (Channel) -> Boolean = { false }
     /** Laufende Sendung eines Senders (null = keine Information, z. B. Programmfuehrer aus). */
     var nowProgramme: (Channel) -> Programme? = { null }
 
     private val rowApprox = context.dp(46)
 
     private val adapter = object : BaseAdapter() {
-        override fun getCount() = channels.size
-        override fun getItem(position: Int) = channels[position]
-        override fun getItemId(position: Int) = position.toLong()
+        override fun getCount() = shown.size
+        override fun getItem(position: Int) = channels[shown[position]]
+        override fun getItemId(position: Int) = shown[position].toLong()
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val row = (convertView as? Row) ?: Row(context)
-            row.bind(position, channels[position], position == selected, position == playingIndex, nowProgramme(channels[position]), System.currentTimeMillis())
+            val ci = shown[position]
+            val ch = channels[ci]
+            row.bind(ci, ch, position == selected, ci == playingIndex, nowProgramme(ch), System.currentTimeMillis(), isFavorite(ch))
             return row
         }
     }
@@ -74,7 +82,7 @@ class ChannelListView(context: Context) : FrameLayout(context) {
         headRow.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         headRow.addView(clock)
         head.addView(headRow)
-        hint.text = "▲▼ wählen    OK starten    ◄ / Zurück schließen"
+        hint.text = "▲▼ wählen   OK starten   OK lang ★ Favorit\n► Programm   Menü Filter   ◄ schließen"
         head.addView(hint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(3) })
         col.addView(head)
 
@@ -99,14 +107,24 @@ class ChannelListView(context: Context) : FrameLayout(context) {
         addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
-    fun setChannels(list: List<Channel>) { channels = list; adapter.notifyDataSetChanged() }
+    fun setChannels(list: List<Channel>) { channels = list; shown = list.indices.toList(); adapter.notifyDataSetChanged() }
+
+    /** Welche Sender gezeigt werden (Favoriten-Filter). Die Auswahl bleibt auf demselben Sender, wenn er noch enthalten ist. */
+    fun setShown(indices: List<Int>, filtered: Boolean) {
+        val keep = selectedChannel
+        shown = indices
+        selected = shown.indexOf(keep).takeIf { it >= 0 } ?: selected.coerceIn(0, (shown.size - 1).coerceAtLeast(0))
+        title.text = if (filtered) "Favoriten ★" else "Sender"
+        adapter.notifyDataSetChanged()
+        if (opened) centerSelection()
+    }
 
     private var opened = false
 
     fun open(currentIndex: Int) {
         opened = true
         playingIndex = currentIndex
-        selected = currentIndex.coerceIn(0, (channels.size - 1).coerceAtLeast(0))
+        selected = shown.indexOf(currentIndex).takeIf { it >= 0 } ?: 0
         updateClock()
         adapter.notifyDataSetChanged()
         showAnimated(fromX = context.dpf(60f))
@@ -125,8 +143,8 @@ class ChannelListView(context: Context) : FrameLayout(context) {
 
     /** Auswahl verschieben (mit Begrenzung, kein Umlauf – in langen Listen orientiert man sich am Rand). */
     fun moveSelection(delta: Int) {
-        if (channels.isEmpty()) return
-        val n = (selected + delta).coerceIn(0, channels.size - 1)
+        if (shown.isEmpty()) return
+        val n = (selected + delta).coerceIn(0, shown.size - 1)
         if (n == selected) return
         selected = n
         adapter.notifyDataSetChanged()
@@ -147,6 +165,7 @@ class ChannelListView(context: Context) : FrameLayout(context) {
     private inner class Row(context: Context) : LinearLayout(context) {
         private val num = context.label(14f, Ui.TEXT_DIM, bold = true)
         private val nm = context.label(15f, Ui.TEXT, bold = true)
+        private val star = context.label(14f, Ui.EDIT, bold = true)
         private val remain = context.label(12f, Ui.TEXT_DIM)
         private val sub = context.label(12f, Ui.TEXT_DIM)
         private val bar = ProgressStrip(context)
@@ -163,6 +182,8 @@ class ChannelListView(context: Context) : FrameLayout(context) {
 
             val col = LinearLayout(context).apply { orientation = VERTICAL }
             val line1 = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            star.text = "★"
+            line1.addView(star, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(5) })
             line1.addView(nm, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             line1.addView(remain, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8) })
             col.addView(line1)
@@ -171,8 +192,9 @@ class ChannelListView(context: Context) : FrameLayout(context) {
             addView(col, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         }
 
-        fun bind(pos: Int, ch: Channel, isSelected: Boolean, isPlaying: Boolean, p: Programme?, nowMs: Long) {
-            num.text = (pos + 1).toString()
+        fun bind(channelIndex: Int, ch: Channel, isSelected: Boolean, isPlaying: Boolean, p: Programme?, nowMs: Long, favourite: Boolean) {
+            num.text = (channelIndex + 1).toString()
+            star.visibility = if (favourite) VISIBLE else GONE
             nm.text = ch.name
             background = if (isSelected) roundRect(Ui.BG_ROW_SELECTED, context.dpf(8f)) else null
             nm.setTextColor(Ui.TEXT)

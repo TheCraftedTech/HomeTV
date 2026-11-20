@@ -15,12 +15,15 @@ interface Scheduler {
  *    gestartet werden soll. Fuenfmal CH+ innerhalb kurzer Zeit startet also genau einen Sender (den fuenften).
  *  - Kehrt die Auswahl zum laufenden Sender zurueck, wird nichts neu geladen.
  *  - [select] (z. B. OK in der Senderliste) bestaetigt sofort.
+ *  - Mit [allowed] ueberspringt [step] nicht zulaessige Sender (Favoriten-Filter); [select] ist davon nie betroffen.
  */
 class ZapController(
     private val channelCount: () -> Int,
     private val scheduler: Scheduler,
     private val debounceMs: () -> Long,
     private val listener: Listener,
+    /** Welche Sender beim relativen Wechsel ([step]) in Frage kommen (z. B. nur Favoriten). Standard: alle. */
+    private val allowed: (Int) -> Boolean = { true },
 ) {
     interface Listener {
         /** Vorgemerkte Auswahl geaendert (noch nicht geladen). */
@@ -49,7 +52,12 @@ class ZapController(
         val n = channelCount()
         if (n <= 0) return
         val base = pending ?: current.takeIf { it >= 0 } ?: 0
-        pending = Math.floorMod(base + delta, n)
+        // naechsten zulaessigen Sender in Richtung [delta] suchen (mit Umlauf); gibt es keinen, wie ohne Filter weiterschalten
+        var target = Math.floorMod(base + delta, n)
+        var tries = 0
+        while (!allowed(target) && tries < n) { target = Math.floorMod(target + delta, n); tries++ }
+        if (tries >= n) target = Math.floorMod(base + delta, n)
+        pending = target
         listener.onPreview(pending!!)
         scheduler.cancel(token)
         scheduler.postDelayed(token, debounceMs(), Runnable { commit() })

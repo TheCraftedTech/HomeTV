@@ -181,6 +181,15 @@ class TuneCoordinatorTest {
         assertEquals(1, maxActive)
     }
 
+    @Test fun preStopRunsOnWorkerBeforeOldSessionIsStoppedAndNewOneStarted() {
+        coordinator.tune(1); drain()
+        events.clear()
+        coordinator.tune(2) { events += "preStop" }
+        assertEquals("nichts laeuft im Aufrufer-Thread", emptyList<String>(), events)
+        drain()
+        assertEquals(listOf("preStop", "stop1", "start2"), events)
+    }
+
     @Test fun neverTwoSessionsAtOnce() {
         coordinator.tune(1); drain()
         coordinator.tune(2); coordinator.tune(3); coordinator.tune(4)   // schnell hintereinander, bevor Hintergrundarbeit lief

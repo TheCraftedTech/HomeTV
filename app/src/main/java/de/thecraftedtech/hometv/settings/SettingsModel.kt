@@ -95,6 +95,8 @@ class SettingsEnv(
     val clearEpgCache: () -> Unit,
     val showDebugOverlay: () -> Unit,
     val logPath: String,
+    /** Programmuebersicht (Vollbild-Raster) oeffnen. */
+    val openGuide: () -> Unit = {},
 )
 
 class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
@@ -137,6 +139,7 @@ class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
         },
         SettingsCategory("epg", "Programmführer") {
             listOf(
+                SettingItem.Action("openGuide", "Programmübersicht öffnen", env.openGuide, help = "Zeigt alle Sender mit dem Programm – Gelaufenes, Laufendes und Kommendes – als Raster. Sonst: Senderliste ►, oder OK lange drücken."),
                 SettingItem.Info("epgStatus", "Status", env.epgStatus),
                 SettingItem.Toggle("epgOn", "Programmführer", { s.epgEnabled }, { s.epgEnabled = it }, "Aus: keine Programmdaten anzeigen und nichts herunterladen."),
                 SettingItem.Text("epgUrl", "XMLTV-URL", { s.epgUrl }, { s.epgUrl = it }, "https://…/epg.xml oder .xml.gz",
@@ -158,6 +161,11 @@ class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
                 SettingItem.Choice("listSecs", "Senderliste schließt nach", listOf(10, 15, 30, 60, 0).map { (if (it == 0) "nie" else "$it s") to it }, { s.channelListTimeoutSeconds }, { s.channelListTimeoutSeconds = it }),
                 SettingItem.Toggle("epgOnZap", "Programm beim Umschalten", { s.showEpgOnZap }, { s.showEpgOnZap = it }, "Zeigt beim Senderwechsel sofort die aktuelle Sendung."),
                 SettingItem.Toggle("epgInList", "Programm in der Senderliste", { s.showEpgInChannelList }, { s.showEpgInChannelList = it }),
+                SettingItem.Toggle("favOnly", "Nur Favoriten", { s.favoritesOnly }, { s.favoritesOnly = it },
+                    "Senderliste, Programmübersicht und CH+/CH− zeigen nur Favoriten (sobald es welche gibt). In Liste/Übersicht: Menü-Taste."),
+                SettingItem.Info("favCount", "Favoriten", { if (s.favorites.isEmpty()) "keine" else "${s.favorites.size}" },
+                    "Favoriten setzen: in Senderliste oder Programmübersicht OK lange drücken (★)."),
+                SettingItem.Action("favClear", "Alle Favoriten entfernen", { s.clearFavorites() }, { s.favorites.isNotEmpty() }),
             )
         },
         SettingsCategory("debug", "Debugging") {

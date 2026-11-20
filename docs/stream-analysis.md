@@ -279,3 +279,11 @@ Ein weiterer, **nicht umgesetzter** Hebel (Idee): Das Gate könnte an den nächs
 `/proc/net/snmp` am Fire TV (Boot 18:58, Messung 20:17): `InDatagrams = 518 074`, **`RcvbufErrors = 1 520`** (0,29 %), über 20 s im Leerlauf unverändert; `rmem_max = 8 MiB`.
 Die Verluste sind also während der Wiedergaben entstanden, aber ohne Messung vor/nach einer einzelnen Sitzung nicht Version/Modus zuordenbar (UDP-Loopback aus 1.0.0 zählt jedes Paket doppelt und hat nur ≈ 0,4 s Pufferreserve).
 Zuordnung künftig mit `scripts\udp-monitor.ps1` (zeigt die Verluste je 5 s live) und der `STATS`-Zeile des App-Logs (`feedDrop`, `lost`, `tsCC`, `vlc corrupt`).
+
+## 15. Senderwechsel aus laufender Wiedergabe: ~2 s Verzögerung (gemessen am Fire TV, 1.2.x/1.3.0)
+Das App-Log (`scripts\pull-log.bat`) zeigt für jeden Senderwechsel **aus laufender Wiedergabe** `session=+1913…+2277 ms` (Kaltstart: `+25…+174 ms`); das Bild kommt dadurch nach 3,8–4,8 s statt nach 2,2–2,9 s.
+Zugleich meldet Android `InputDispatcher … spent 2027ms processing KeyEvent` / `remote_perf key event latency … Latency: 2032` für genau diese Tastendrücke: Der **Haupt-Thread war ~2 s blockiert**. Beim schnellen Durchschalten (Sender noch ohne Daten) tritt es nicht auf (TEARDOWN nach 0,2 s).
+Befund: Der blockierende Aufruf ist `MediaPlayer.stop()` (lief bisher im Haupt-Thread; erst danach wurde TEARDOWN gesendet, ≈ 2,1–2,3 s nach dem Log-Eintrag „Sender n/97"). Die Dauer entspricht etwa dem Puffer (2000 ms); **warum** der Stopp so lange dauert (Audio-Ausgabe leert den Puffer? Hardware-Decoder?) ist **nicht geklärt**.
+Änderung in 1.4.0: `stop()` läuft auf dem seriellen Worker-Thread (`TuneCoordinator.tune(index, preStop)`), der Haupt-Thread bleibt frei (kein Ruckeln der Oberfläche beim Umschalten). `detach()` wartet vorher auf den Worker, damit `release()` den Stopp nie überholt.
+**Nicht verändert und daher voraussichtlich weiter vorhanden:** die ~2 s bis zur neuen Session (der Stopp muss vor dem Start des nächsten Senders fertig sein). Das Log enthält ab 1.4.0 die Zeile `LibVLC-Stop (Worker-Thread) dauerte … ms`; nächster Schritt wäre, anhand dieser Messung zu entscheiden, ob Stopp und neue Session sicher überlappen dürfen.
+

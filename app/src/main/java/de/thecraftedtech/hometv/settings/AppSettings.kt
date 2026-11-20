@@ -130,6 +130,28 @@ class AppSettings(private val store: KeyValueStore, val defaultHost: String = DE
         get() = store.getBoolean("showEpgInChannelList", true)
         set(v) = store.putBoolean("showEpgInChannelList", v)
 
+    // ---- Favoriten ----
+    /** Favoriten als Sendernamen (eine Zeile je Sender gespeichert). */
+    val favorites: Set<String>
+        get() = store.getString("favorites", "").orEmpty().split('\n').filter { it.isNotBlank() }.toCollection(LinkedHashSet())
+
+    fun isFavorite(name: String): Boolean = favorites.contains(name)
+
+    /** Schaltet einen Favoriten um und gibt den neuen Zustand zurueck (true = jetzt Favorit). */
+    fun toggleFavorite(name: String): Boolean {
+        val set = LinkedHashSet(favorites)
+        val now = if (set.contains(name)) { set.remove(name); false } else { set.add(name); true }
+        store.putString("favorites", set.joinToString("\n"))
+        return now
+    }
+
+    fun clearFavorites() = store.putString("favorites", "")
+
+    /** Senderliste, Programmuebersicht und CH+/CH- zeigen nur Favoriten (sofern es welche gibt). */
+    var favoritesOnly: Boolean
+        get() = store.getBoolean("favoritesOnly", false)
+        set(v) = store.putBoolean("favoritesOnly", v)
+
     // ---- Programmfuehrer (EPG) ----
     /** XMLTV-URL. Bewusst KEIN Standardwert: ohne echte Quelle bleibt das Feld leer. */
     var epgUrl: String

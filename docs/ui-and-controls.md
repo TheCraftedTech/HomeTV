@@ -1,4 +1,4 @@
-# Oberfläche und Fernbedienung (Version 1.3.0)
+# Oberfläche und Fernbedienung (Version 1.4.0)
 
 Leitgedanke: Das Fernsehbild steht im Mittelpunkt; alles andere erscheint nur bei Bedarf, ist groß und ruhig, und die Fernbedienung verhält sich wie bei einem Fernseher.
 **Status:** Die Oberfläche ist gebaut und kompiliert, die Logik (Senderwahl, Einstellungen, Menümodell) ist unit-getestet. **Wie sie auf dem Fernseher aussieht und sich anfühlt, habe ich nicht gesehen** –
@@ -30,7 +30,8 @@ Bewusst **keine** Android-Fokussteuerung: eine zentrale Tastenverteilung (`MainA
 |---|---|
 | **▲ / CH+** | nächster Sender (Gedrückthalten: schneller durchschalten) |
 | **▼ / CH−** | vorheriger Sender |
-| **▶ (rechts)** / Guide / TV | Senderliste öffnen (rechts eingeblendet) |
+| **▶ (rechts)** | Senderliste öffnen (rechts eingeblendet) |
+| **OK lange drücken** / Guide / TV | **Programmübersicht** (Vollbild-Raster) |
 | **◀ (links)** | Einstellungen öffnen (links eingeblendet) |
 | **OK** | Info-Leiste ein/aus (bei Fehleranzeige: erneut versuchen) |
 | **Menü** (kurz) | Einstellungen |
@@ -46,9 +47,11 @@ Bewusst **keine** Android-Fokussteuerung: eine zentrale Tastenverteilung (`MainA
 |---|---|
 | ▲ / ▼ / CH± | Auswahl bewegen (Gedrückthalten beschleunigt; **die Wiedergabe läuft weiter**) |
 | Bild ↑/↓ | 8 Einträge springen |
-| **OK** | ausgewählten Sender starten und Liste schließen |
+| **OK** (kurz) | ausgewählten Sender starten und Liste schließen |
+| **OK lange drücken** | ★ Favorit ein/aus (der Sender wird dabei nicht gestartet) |
+| **Menü** | Favoriten-Filter ein/aus (nur Favoriten ↔ alle Sender) |
+| ▶ | Programmübersicht öffnen |
 | ◀ / Zurück | Liste schließen, nichts ändern |
-| Menü | Einstellungen statt Liste |
 Schließt sich automatisch nach 15 s Inaktivität (einstellbar: 10/15/30/60 s/nie).
 
 ### Einstellungen (links) – seit 1.3.0: markieren, anklicken, bearbeiten
@@ -68,6 +71,18 @@ Die Bedienlogik steckt in `settings/MenuNavigator` (ohne Android, 14 Unit-Tests)
 ### Debug-Overlay (nur wenn Debug-Modus an **und** Menü lang gedrückt)
 ▲▼ Puffer (1000/2000/3000/5000 ms), ◀▶ Audio-Versatz ∓/± 50 ms, OK/Zurück schließen, CH± wechselt weiter den Sender.
 
+### Programmübersicht (Vollbild)
+| Taste | Aktion |
+|---|---|
+| ▲ / ▼ / CH± | Sender wechseln (Zeile), Zeitpunkt bleibt |
+| ◀ / ▶ | vorige / nächste Sendung des Senders (Lücken werden übersprungen); das Zeitfenster scrollt seitenweise mit |
+| ⏪ / ⏩ (falls vorhanden) | ± 3 Stunden |
+| Bild ↑/↓ | 8 Sender springen |
+| **OK** (kurz) | Sender ansehen (die Übersicht schließt sich) |
+| **OK lange drücken** | ★ Favorit ein/aus |
+| **Menü** | Favoriten-Filter ein/aus |
+| Zurück | schließen |
+
 ## Senderwechsel („schnelles Umschalten")
 1. Jeder Druck auf CH+/CH−/▲/▼ ändert sofort die **vorgemerkte Auswahl** und blendet Nummer, Sendername und (bei aktivem Programmführer) die aktuelle Sendung ein – **noch bevor** etwas geladen wird.
 2. Geladen wird erst, wenn **300 ms** (einstellbar 150–800 ms) keine weitere Taste kam. Fünfmal CH+ innerhalb kurzer Zeit startet also genau **einen** Sender, den fünften.
@@ -75,6 +90,17 @@ Die Bedienlogik steckt in `settings/MenuNavigator` (ohne Android, 14 Unit-Tests)
 4. Kehrt die Auswahl zum laufenden Sender zurück, wird nichts neu geladen.
 5. Wird ein Wechsel angefordert, während ein anderer noch lädt, bricht der alte ab (Handshake-Abbruch zwischen den RTSP-Schritten), die alte Session wird per TEARDOWN beendet, **erst danach** startet die neue.
    Es laufen nie zwei Streams gleichzeitig (Tests: `TuneCoordinatorTest`, `ZapControllerTest`).
+
+## Programmübersicht und Favoriten (ab 1.4.0)
+**Programmübersicht:** Links die Sender (Nummer, ★, Name), rechts die Sendungen auf einer Zeitachse mit **3 Stunden Sichtfenster**; Zeitleiste mit 30-Minuten-Marken, ein roter Strich markiert „jetzt".
+*Bereits gelaufene* Sendungen sind gedimmt, die *laufende* hat eine hellere Fortschrittsfläche, *kommende* sind normal; die gewählte Sendung ist blau mit weißem Rahmen. Unten stehen Sender, Titel, Zeit und Dauer, Status
+(„BEREITS GELAUFEN" / „LÄUFT · noch 23 min" / „BEGINNT UM 21:45") und – wenn vorhanden – die Beschreibung. Auswahlbereich: 6 Stunden zurück bis 7 Tage voraus; tatsächlich vorhanden ist, was die XMLTV-Datei und die Einstellung „Tage im Voraus" hergeben (Standard 3).
+Ohne XMLTV-URL (oder bei nicht zugeordneten Sendern) zeigt die Übersicht die Sender mit „Keine Programminformation" und einem Hinweis; Favoriten und Umschalten funktionieren auch dann.
+**Öffnen:** OK lange drücken (bei laufendem Fernsehbild), ▶ in der Senderliste, Guide-/TV-Taste, oder *Einstellungen → Programmführer → Programmübersicht öffnen*.
+**Favoriten:** In Senderliste und Programmübersicht **OK lange drücken** (★ vor dem Namen). Mit der **Menü-Taste** schaltet man dort den Filter „nur Favoriten" ein/aus (Einstellungen → Oberfläche → *Nur Favoriten* ist dasselbe).
+Bei aktivem Filter zeigen Liste und Übersicht nur Favoriten und **CH+/CH− (▲▼) überspringen alle anderen Sender**; OK in der Liste/Übersicht startet jeden angezeigten Sender. Gibt es noch keine Favoriten, wirkt der Filter nicht (alle Sender bleiben sichtbar).
+Gespeichert werden die Sendernamen (bleiben bei Listenänderungen erhalten); *Einstellungen → Oberfläche → Alle Favoriten entfernen* löscht sie.
+Die Übersicht ist komplett selbst gezeichnet (eine View statt hunderter Zellen); die Raster-Navigation steckt in `epg/GuideNavigator` (9 Unit-Tests). Wie sie auf dem Fernseher aussieht, habe ich **nicht gesehen**.
 
 ## Senderliste (ab 1.3.0)
 Schwebende Karte rechts (340 dp breit, 20 dp Randabstand, Rand und abgerundete Ecken – man sieht auch bei Overscan, wo sie endet). Je Sender eine Zeile mit Nummer und Name;

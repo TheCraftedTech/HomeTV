@@ -91,3 +91,16 @@ Maßnahmen:
 | Socket-Limits | `rmem_max = 8 388 608`, `rmem_default = 212 992` | Die angeforderten 4 MiB für den RTP-Socket sind erlaubt |
 | Systemlast im Leerlauf | Load-Average ≈ 6,6 (4 Kerne) | Amazon-Hintergrunddienste belasten die CPU; Decoder/Empfang konkurrieren – deshalb hohe Empfangs-Thread-Priorität |
 | Eingabegeräte | „Amazon Fire TV Remote", `hdmipower` (KEY_POWER), `WOW_INPUT_DEVICE` (KEY_POWER), `WOBLE_INPUT_DEVICE` (KEY_WAKEUP) | Interne Power-/Wake-Eingabegeräte (Namen deuten auf HDMI-/Funk-Aufwecken hin – Deutung nicht verifiziert), die das System selbst verarbeitet |
+
+## 4. Optionen/„Deinstallieren" auf der Kachel des Fire-TV-Hauptmenüs (Stand 1.4.0)
+Beobachtung des Nutzers: Auf der App-Kachel lässt sich nur „Starten" wählen, ein Optionsmenü (z. B. Deinstallieren) erscheint nicht. **Ursache nicht eindeutig geklärt.** Gemessen (nur lesend, per ADB):
+- Die App ist ein normales Nutzerpaket: `flags=[HAS_CODE ALLOW_CLEAR_USER_DATA]`, **nicht** System, nicht versteckt, nicht gesperrt (`hidden=false suspended=false`), keine Deinstallationssperre, keine Geräteadministratoren außer der Kindersicherung (`com.amazon.tv.parentalcontrols`, Policy „wipe-data").
+- Installationsquelle: `installer=null` (per ADB installiert, nicht über den Amazon Appstore).
+- Das Manifest enthält nichts, was Optionen unterbinden würde (`LAUNCHER` + `LEANBACK_LAUNCHER`, Banner und Icon gesetzt).
+- Im Systemlog fragt der Launcher beim Start/Beenden der App den **Amazon-Appstore** nach dem Eintrag der App: `AmazonAppstore.Library/LibraryContentProvider … getSingleLibraryItemMetadata called for id: de.thecraftedtech.hometv`. Für eine per ADB installierte App gibt es dort keinen Bibliothekseintrag.
+**Vermutung (nicht bewiesen):** Das Optionsmenü der Kachel stützt sich auf Appstore-/Bibliotheksdaten; sie fehlen für diese App – zusammen mit den blockierten Paket-Broadcasts (siehe Abschnitt 2) und dem alten Icon passt das zusammen. Die App selbst kann darauf keinen Einfluss nehmen.
+**Wege zum Deinstallieren/Verwalten (unabhängig von der Kachel):**
+- *Fire TV → Einstellungen → Anwendungen → Installierte Anwendungen verwalten → Home TV* → „Deinstallieren" (auch „Daten löschen", „Cache leeren", „Beenden erzwingen").
+- Auf dem Startbildschirm die Kachel markieren und die **Menü-Taste (≡)** drücken; manche Fire-OS-Versionen zeigen das Optionsmenü nur dort, nicht beim langen Druck auf OK.
+- Per ADB (nur durch dich): `adb uninstall de.thecraftedtech.hometv`.
+

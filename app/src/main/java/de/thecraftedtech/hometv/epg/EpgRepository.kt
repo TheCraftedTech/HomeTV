@@ -53,6 +53,9 @@ class EpgRepository(
     fun now(channel: Channel, t: Long = clock()): Programme? = data?.now(channel.name, t)
     fun next(channel: Channel, t: Long = clock()): Programme? = data?.next(channel.name, t)
 
+    /** Alle gespeicherten Sendungen eines Senders, nach Beginn sortiert (fuer die Programmuebersicht; leer = keine Daten). */
+    fun programmes(channel: Channel): Array<Programme> = data?.programmes(channel.name) ?: emptyArray()
+
     // ------------------------------------------------------------------ Start / Cache
 
     /** Laedt den lokalen Cache (schnell, ohne Netzwerk). Im Hintergrund aufrufen. */

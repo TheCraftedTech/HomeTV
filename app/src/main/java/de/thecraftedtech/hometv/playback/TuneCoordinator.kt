@@ -28,12 +28,17 @@ class TuneCoordinator<H : TuneHandle>(
 
     val hasActive: Boolean get() = current != null
 
-    /** Fordert Sender [index] an. Gibt die zugehoerige Generation zurueck. Nur im Haupt-Thread aufrufen. */
-    fun tune(index: Int): Int {
+    /**
+     * Fordert Sender [index] an. Gibt die zugehoerige Generation zurueck. Nur im Haupt-Thread aufrufen.
+     * @param preStop  Blockierende Vorarbeit (z. B. LibVLC-Player anhalten), die auf dem [worker] VOR dem Beenden der alten
+     *                 Session laeuft – so blockiert sie nie den Haupt-Thread.
+     */
+    fun tune(index: Int, preStop: (() -> Unit)? = null): Int {
         val gen = ++generation
         val old = current
         current = null
         worker.execute {
+            preStop?.invoke()
             old?.stopBlocking()
             mainPost(Runnable { if (gen == generation) current = factory(index, gen) })
         }

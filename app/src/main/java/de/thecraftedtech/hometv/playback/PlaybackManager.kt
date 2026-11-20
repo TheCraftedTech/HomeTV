@@ -18,7 +18,9 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.interfaces.IMedia
 import org.videolan.libvlc.util.VLCVideoLayout
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /** Momentaufnahme fuer das Debug-Overlay (alles gemessene Werte, nichts geschaetzt). */
 data class DebugSnapshot(
@@ -43,7 +45,7 @@ class PlaybackManager(
     private val context: Context,
     private val settings: AppSettings,
     private val main: Handler,
-    worker: Executor,
+    private val worker: Executor,
     private val listener: Listener,
 ) {
     enum class State { IDLE, LOADING, PLAYING, PAUSED, ERROR }
@@ -137,6 +139,7 @@ class PlaybackManager(
     /** Beendet alles sofort (inkl. TEARDOWN) und gibt LibVLC frei – fuer onStop. */
     fun detach() {
         stopTimers()
+        awaitWorker(3_000)          // ein noch laufendes MediaPlayer.stop() auf dem Worker abwarten, bevor release() es ueberholt
         coordinator.stopNow()
         handle = null
         val mp = player; player = null
@@ -147,6 +150,13 @@ class PlaybackManager(
         runCatching { mp?.release() }
         runCatching { vlc?.release() }
         setState(State.IDLE)
+    }
+
+    /** Wartet, bis alle bisher eingereihten Worker-Aufgaben (z. B. ein blockierendes Player-Stop) fertig sind. */
+    private fun awaitWorker(timeoutMs: Long) {
+        val latch = CountDownLatch(1)
+        try { worker.execute { latch.countDown() } } catch (_: Exception) { return }
+        runCatching { latch.await(timeoutMs, TimeUnit.MILLISECONDS) }
     }
 
     private fun stopTimers() {
@@ -167,9 +177,15 @@ class PlaybackManager(
         val ch = channels[index]
         AppLog.i(tag, "Sender ${index + 1}/${channels.size}: ${ch.name} (Modus ${transport.key}, Puffer ${settings.cacheMs} ms)")
         handle = null
-        runCatching { player?.stop() }
         setState(State.LOADING)
-        coordinator.tune(index)
+        // MediaPlayer.stop() blockiert auf dem Fire TV ~2 s (gemessen: Tastenlatenz 2027 ms im Systemlog, neue Session erst
+        // +1,9…2,3 s nach dem Sender-Start). Deshalb auf dem seriellen Worker statt im Haupt-Thread; die Dauer wird geloggt.
+        val mp = player
+        coordinator.tune(index) {
+            val t0 = System.currentTimeMillis()
+            runCatching { mp?.stop() }
+            AppLog.i(tag, "LibVLC-Stop (Worker-Thread) dauerte ${System.currentTimeMillis() - t0} ms")
+        }
     }
 
     /** Erzeugt Feed + Session + Media fuer den aktuellen Sender (Haupt-Thread, nur fuer die neueste Generation). */

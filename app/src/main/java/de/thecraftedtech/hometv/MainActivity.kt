@@ -22,6 +22,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import de.thecraftedtech.hometv.channels.Channel
+import de.thecraftedtech.hometv.channels.ChannelFilter
 import de.thecraftedtech.hometv.channels.Playlist
 import de.thecraftedtech.hometv.core.AppLog
 import de.thecraftedtech.hometv.epg.EpgRepository
@@ -33,6 +34,7 @@ import de.thecraftedtech.hometv.settings.SettingsModel
 import de.thecraftedtech.hometv.settings.SharedPrefsStore
 import de.thecraftedtech.hometv.ui.ChannelListView
 import de.thecraftedtech.hometv.ui.DebugOverlayView
+import de.thecraftedtech.hometv.ui.GuideView
 import de.thecraftedtech.hometv.ui.InfoBarView
 import de.thecraftedtech.hometv.ui.MenuView
 import de.thecraftedtech.hometv.ui.MessageView
@@ -77,6 +79,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     private lateinit var errorText: TextView
     private lateinit var infoBar: InfoBarView
     private lateinit var channelList: ChannelListView
+    private lateinit var guide: GuideView
     private lateinit var menu: MenuView
     private lateinit var debugOverlay: DebugOverlayView
     private lateinit var volumeView: VolumeIndicatorView
@@ -93,6 +96,10 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     private val consumedDown = HashSet<Int>()
     private val zapHold = HoldTracker()
     private val listHold = HoldTracker()
+    private val guideRowHold = HoldTracker()
+    private val guideTimeHold = HoldTracker()
+    private var okPending = false      // OK in Senderliste/Programmuebersicht: kurz = ansehen (beim Loslassen), lang = Favorit
+    private var okLong = false
     private var menuLongHandled = false
 
     private val idleStop = Runnable {
@@ -151,7 +158,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         playback = PlaybackManager(this, settings, main, playWorker, this)
         epgRepo = EpgRepository(File(filesDir, "epg.bin"), settings, epgWorker, { r -> main.post(r) })
         epgRepo.listener = this
-        zap = ZapController({ channels.size }, HandlerScheduler(), { settings.zapDebounceMs.toLong() }, this)
+        zap = ZapController({ channels.size }, HandlerScheduler(), { settings.zapDebounceMs.toLong() }, this, allowed = { i -> allowedForZap(i) })
 
         buildOverlays()
         hideSystemUi()
@@ -162,6 +169,10 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         val match = FrameLayout.LayoutParams.MATCH_PARENT
         infoBar = InfoBarView(this)
         channelList = ChannelListView(this)
+        channelList.isFavorite = { ch -> isFav(ch) }
+        guide = GuideView(this)
+        guide.isFavorite = { ch -> isFav(ch) }
+        guide.programmes = { ch -> epgRepo.programmes(ch) }
         channelList.nowProgramme = { ch -> if (settings.showEpgInChannelList && settings.epgActive) epgRepo.now(ch) else null }
 
         val env = SettingsEnv(
@@ -175,6 +186,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
             refreshEpg = { epgRepo.refresh(force = true); showMessage("Programmführer wird aktualisiert …") },
             clearEpgCache = { epgRepo.clearCache(); showMessage("Zwischenspeicher gelöscht"); channelList.refresh() },
             showDebugOverlay = { menu.close(); showDebugOverlay() },
+            openGuide = { menu.close(); openGuide() },
             logPath = (getExternalFilesDir(null) ?: filesDir).absolutePath + "/hometv.log",
         )
         menu = MenuView(this, SettingsModel(settings, env).categories)
@@ -185,6 +197,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         message = MessageView(this)
 
         root.addView(infoBar, FrameLayout.LayoutParams(match, match))
+        root.addView(guide, FrameLayout.LayoutParams(match, match))
         // schwebende Karten mit Abstand zum Rand (Overscan-sicher); Breite bewusst schmal, damit viel Bild sichtbar bleibt
         root.addView(channelList, FrameLayout.LayoutParams(dp(340), match, Gravity.END).apply { setMargins(0, dp(20), dp(20), dp(20)) })
         root.addView(menu, FrameLayout.LayoutParams(dp(520), match, Gravity.START).apply { setMargins(dp(20), dp(20), 0, dp(20)) })
@@ -295,6 +308,42 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         playback.channels = list
         epgRepo.channels = list
         channelList.setChannels(list)
+        guide.channels = list
+        applyFilter()
+    }
+
+    // ------------------------------------------------------------------ Favoriten / Filter
+
+    private fun isFav(ch: Channel) = settings.isFavorite(ch.name)
+
+    private fun filterActive() = ChannelFilter.isActive(channels, settings.favoritesOnly) { isFav(it) }
+
+    /** CH+/CH- ueberspringen Nicht-Favoriten, solange der Filter wirkt. */
+    private fun allowedForZap(i: Int): Boolean = !filterActive() || channels.getOrNull(i)?.let { isFav(it) } == true
+
+    /** Senderliste und Programmuebersicht an den Favoriten-Filter anpassen. */
+    private fun applyFilter() {
+        val active = filterActive()
+        val idx = ChannelFilter.shown(channels, settings.favoritesOnly) { isFav(it) }
+        channelList.setShown(idx, active)
+        guide.filterLabel = if (active) "★ Favoriten" else "Alle Sender"
+        guide.noDataHint = if (!settings.epgActive) "Programmführer nicht eingerichtet – Einstellungen → Programmführer → XMLTV-URL" else ""
+        guide.setRows(idx)
+    }
+
+    private fun toggleFavoriteSelected() {
+        val ci = if (guide.isOpen) guide.selectedChannelIndex else channelList.selectedChannel
+        val ch = channels.getOrNull(ci) ?: return
+        val nowFav = settings.toggleFavorite(ch.name)
+        showMessage(if (nowFav) "★ ${ch.name} ist jetzt Favorit" else "${ch.name} aus den Favoriten entfernt")
+        applyFilter()
+    }
+
+    private fun toggleFavoritesFilter() {
+        if (channels.none { isFav(it) }) { showMessage("Noch keine Favoriten – OK lange drücken, um einen Sender zu markieren"); return }
+        settings.favoritesOnly = !settings.favoritesOnly
+        applyFilter()
+        showMessage(if (settings.favoritesOnly) "Nur Favoriten" else "Alle Sender")
     }
 
     private fun sourceLabel() = if (settings.customPlaylist) settings.playlistUrl else settings.fritzboxHost
@@ -396,7 +445,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
 
     private fun showInfo(index: Int, epg: Boolean, autoHide: Boolean, preview: Boolean = false) {
         if (channels.isEmpty()) return
-        if (menu.isOpen || channelList.isOpen) return   // Menue/Senderliste haben Vorrang, die Leiste legt sich nicht darueber
+        if (menu.isOpen || channelList.isOpen || guide.isOpen) return   // Menue/Liste/Uebersicht haben Vorrang, die Leiste legt sich nicht darueber
         shownInfoIndex = index.coerceIn(0, channels.size - 1)
         shownInfoEpg = epg
         infoAutoHide = autoHide
@@ -434,6 +483,15 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         armListTimeout()
     }
 
+    private fun openGuide() {
+        if (channels.isEmpty()) return
+        closeChannelList(); infoBar.hide(); closeDebugOverlay()
+        applyFilter()
+        guide.open(zap.pending ?: zap.current.coerceAtLeast(0))
+    }
+
+    private fun closeGuide() { if (guide.isOpen) guide.close() }
+
     private fun closeChannelList() {
         main.removeCallbacks(listAutoClose)
         if (channelList.isOpen) channelList.close()
@@ -446,7 +504,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     }
 
     private fun openMenu() {
-        closeChannelList(); infoBar.hide(); closeDebugOverlay()
+        closeChannelList(); closeGuide(); infoBar.hide(); closeDebugOverlay()
         playbackDirty = false
         menu.open()
     }
@@ -459,6 +517,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     private fun closeAllLayers() {
         main.removeCallbacks(listAutoClose)
         channelList.forceClose()
+        guide.forceClose()
         menu.forceClose()
         infoBar.visibility = View.GONE
         debugOverlay.visibility = View.GONE
@@ -502,6 +561,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     override fun onItemChanged(item: SettingItem) {
         when (item.id) {
             "cache", "transport", "gate" -> playbackDirty = true
+            "favOnly", "favClear" -> applyFilter()
             "idle" -> armIdleTimer()
             "host", "playlistUrl" -> reloadChannels(sourceChanged = true)
             "audio" -> playback.applyAudioDelay()
@@ -516,6 +576,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     override fun onEpgStatusChanged() {
         if (menu.isOpen) menu.refresh()
         if (channelList.isOpen) channelList.refresh()
+        if (guide.isOpen) { applyFilter(); guide.refresh() }
         if (infoBar.visibility == View.VISIBLE) bindInfo(shownInfoIndex, shownInfoEpg)
     }
 
@@ -528,6 +589,13 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         // Tasten, die schon bei DOWN verbraucht wurden, auch bei UP verbrauchen
         if (e.action == KeyEvent.ACTION_UP) {
             if (code == KeyEvent.KEYCODE_MENU) return onMenuUp()
+            if (isOkKey(code) && okPending) {
+                okPending = false
+                val wasLong = okLong; okLong = false
+                consumedDown.remove(code)
+                if (!wasLong) onLayerOkShort()
+                return true
+            }
             if (consumedDown.remove(code)) return true
             return super.dispatchKeyEvent(e)
         }
@@ -561,6 +629,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         if (code == KeyEvent.KEYCODE_MENU) return onMenuDown(e)
         return when {
             menu.isOpen -> menu.handleKey(code, e.repeatCount)
+            guide.isOpen -> handleGuideKey(e)
             channelList.isOpen -> handleListKey(e)
             else -> handlePlayerKey(e)
         }
@@ -569,7 +638,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     // ---- Menue-Taste: kurz = Menue, lang = Debug-Overlay (nur bei aktivem Debug-Modus)
     private fun onMenuDown(e: KeyEvent): Boolean {
         if (e.repeatCount == 0) menuLongHandled = false
-        if (e.repeatCount == 1 && !menuLongHandled && settings.debugMode && !menu.isOpen) {
+        if (e.repeatCount == 1 && !menuLongHandled && settings.debugMode && !menu.isOpen && !guide.isOpen && !channelList.isOpen) {
             menuLongHandled = true
             if (debugOverlay.isOpen) closeDebugOverlay() else showDebugOverlay()
         }
@@ -578,7 +647,11 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
 
     private fun onMenuUp(): Boolean {
         if (menuLongHandled) { menuLongHandled = false; return true }
-        if (menu.isOpen) onClose() else openMenu()
+        when {
+            menu.isOpen -> onClose()
+            guide.isOpen || channelList.isOpen -> toggleFavoritesFilter()   // Menue-Taste = Favoriten-Filter
+            else -> openMenu()
+        }
         return true
     }
 
@@ -591,11 +664,44 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> if (listHold.shouldStep(e.repeatCount, now)) channelList.moveSelection(+1)
             KeyEvent.KEYCODE_PAGE_UP -> channelList.moveSelection(-8)
             KeyEvent.KEYCODE_PAGE_DOWN -> channelList.moveSelection(+8)
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (e.repeatCount == 0) { val sel = channelList.selected; closeChannelList(); zap.select(sel) }
-            }
-            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> closeChannelList()
-            KeyEvent.KEYCODE_DPAD_RIGHT -> Unit
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> handleLayerOk(e)
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (e.repeatCount == 0) closeChannelList()
+            KeyEvent.KEYCODE_DPAD_RIGHT -> if (e.repeatCount == 0) openGuide()
+            else -> return false
+        }
+        return true
+    }
+
+    // ---- OK in Senderliste/Programmuebersicht: kurz (beim Loslassen) = Sender ansehen, lang = Favorit umschalten
+    private fun isOkKey(code: Int) = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+
+    private fun handleLayerOk(e: KeyEvent): Boolean {
+        if (e.repeatCount == 0) { okPending = true; okLong = false }
+        else if (e.repeatCount == 1 && okPending && !okLong) { okLong = true; toggleFavoriteSelected() }
+        return true
+    }
+
+    private fun onLayerOkShort() {
+        when {
+            guide.isOpen -> { val ci = guide.selectedChannelIndex; closeGuide(); if (ci >= 0) zap.select(ci) }
+            channelList.isOpen -> { val ci = channelList.selectedChannel; closeChannelList(); if (ci >= 0) zap.select(ci) }
+        }
+    }
+
+    // ---- Programmuebersicht
+    private fun handleGuideKey(e: KeyEvent): Boolean {
+        val now = System.currentTimeMillis()
+        when (e.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> if (guideRowHold.shouldStep(e.repeatCount, now)) guide.moveRow(-1)
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> if (guideRowHold.shouldStep(e.repeatCount, now)) guide.moveRow(+1)
+            KeyEvent.KEYCODE_DPAD_LEFT -> if (guideTimeHold.shouldStep(e.repeatCount, now)) guide.moveTime(-1)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> if (guideTimeHold.shouldStep(e.repeatCount, now)) guide.moveTime(+1)
+            KeyEvent.KEYCODE_PAGE_UP -> guide.moveRow(-8)
+            KeyEvent.KEYCODE_PAGE_DOWN -> guide.moveRow(+8)
+            KeyEvent.KEYCODE_MEDIA_REWIND -> guide.jump(-3 * 3_600_000L)
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> guide.jump(+3 * 3_600_000L)
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> handleLayerOk(e)
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> if (e.repeatCount == 0) closeGuide()
             else -> return false
         }
         return true
@@ -620,9 +726,10 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
             KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_DOWN -> { if (zapHold.shouldStep(e.repeatCount, now)) zap.step(-1); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { if (e.repeatCount == 0) openChannelList(); return true }
             KeyEvent.KEYCODE_DPAD_LEFT -> { if (e.repeatCount == 0) openMenu(); return true }
-            KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_TV -> { if (e.repeatCount == 0) openChannelList(); return true }
+            KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_TV -> { if (e.repeatCount == 0) openGuide(); return true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (e.repeatCount > 0) return true
+                if (e.repeatCount == 1) { openGuide(); return true }   // OK lange gedrueckt: Programmuebersicht
+                if (e.repeatCount > 1) return true
                 if (playback.state == PlaybackManager.State.ERROR) playback.restartCurrent()
                 else if (infoBar.visibility == View.VISIBLE) infoBar.hide()
                 else showInfo(zap.current, epg = true, autoHide = true)
