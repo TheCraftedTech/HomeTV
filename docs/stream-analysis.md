@@ -140,6 +140,22 @@ Das stützt die Hypothese „verwaiste SAT>IP-Sessions blockieren/stören den St
 Nicht getestet: VLC (nicht installiert), Bild/Ton in einem sichtbaren Fenster (ffplay-Lauf wurde nicht
 visuell beobachtet; Bild-Nachweis stammt aus dem extrahierten Standbild), Aussetzer über Wi-Fi.
 
+## 11. Netz-Topologie und UDP-/NAT-Befund (wichtig für Fire TV)
+
+Gemessen am 2026-11-20:
+
+- Laptop (WLAN) `192.168.1.30/24`, Gateway `192.168.1.1`; die FRITZ!Box `192.168.200.1` liegt **einen Router weiter**
+  (`tracert`: `192.168.1.1` → `192.168.200.1`). Der Fire TV (`192.168.1.71`, Ethernet) liegt im selben Netz wie der Laptop und
+  erreicht die Box (Ping 1,9 ms, 0 % Verlust).
+- Eigenes RTSP-Skript (`tools/rtsp_probe.py`): **ohne** Punch-Paket **0 RTP-Pakete in 6 s**; **mit** einem einzigen
+  4-Byte-UDP-Paket vom Client-RTP-Port an den Server-RTP-Port: **5690 Pakete in 6 s (10,1 Mbit/s), Payload-Typ 33,
+  erstes Paket nach 24 ms**. ffmpeg sendet solche Punch-Pakete automatisch – deshalb funktionierte ffmpeg von Anfang an.
+- Ursache: Der Router `192.168.1.1` lässt unaufgefordertes UDP aus Richtung Box nicht durch (zustandsbehafteter NAT/Firewall).
+  Das Punch-Paket erzeugt den Rückweg.
+- Im VLC-Quellcode (`live555.cpp`, Zweig 3.0.x) habe ich keinen NAT-Punch gefunden; ob die live555-Bibliothek selbst einen
+  sendet, ist ungeklärt. Ob die **VLC-App auf dem Fire TV** den Stream in diesem Netz abspielt, ist **ungetestet**.
+- Konsequenz: Die Home-TV-App enthält einen eigenen SAT>IP-Client mit Punch (siehe `docs/player-technology.md`).
+
 ## 10. Folgerungen für die Player-Wahl
 
 1. Der Stream ist **kein HTTP/HLS/DASH**, sondern SAT>IP-RTSP mit RTP-MPEG-TS über UDP.

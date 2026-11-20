@@ -85,6 +85,14 @@ for line in h.split("\r\n"):
     if line.lower().startswith("com.ses.streamid:"):
         stream_id = line.split(":", 1)[1].strip()
 play_target = f"rtsp://{host}:{port}/stream={stream_id}" if stream_id else url
+if len(sys.argv) > 4 and sys.argv[4] == "punch":
+    # Wie ffmpeg: ein kleines UDP-Paket vom Client-RTP-Port an den Server-RTP-Port,
+    # damit NAT/Firewall einen Rueckpfad fuer die eingehenden RTP-Pakete oeffnen.
+    import re
+    m = re.search(r"server_port=(\d+)-(\d+)", server_ports)
+    if m:
+        rtp.sendto(b"\xce\xfa\xed\xfe", (host, int(m.group(1))))
+        print(f"[punch] UDP-Paket an {host}:{m.group(1)} gesendet\n")
 t0 = time.time()
 request("PLAY", play_target)
 

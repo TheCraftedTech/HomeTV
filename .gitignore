@@ -27,12 +27,12 @@ signing.properties
 *.secret
 credentials*.json
 
-# Persönliche Testkonfiguration (enthält LAN-Adressen / Sender des Nutzers)
+# PersÃ¶nliche Testkonfiguration (enthÃ¤lt LAN-Adressen / Sender des Nutzers)
 tests/data/
 scripts/firetv.local.cfg
 *.local.*
 
-# Große Binärdateien / Mitschnitte
+# GroÃŸe BinÃ¤rdateien / Mitschnitte
 *.ts
 *.mp4
 *.mkv
@@ -48,3 +48,10 @@ __pycache__/
 Thumbs.db
 .vscode/*
 !.vscode/settings.json
+
+# Lokaler ADB-Schluessel (privat!)
+.android-user/
+firetv-ip.txt
+keystore/
+local.properties
+.kotlin/
