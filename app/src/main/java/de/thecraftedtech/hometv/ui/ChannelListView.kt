@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import de.thecraftedtech.hometv.channels.Channel
+import de.thecraftedtech.hometv.core.ListNav
 import de.thecraftedtech.hometv.epg.Programme
 import java.text.DateFormat
 import java.util.Date
@@ -142,9 +143,9 @@ class ChannelListView(context: Context) : FrameLayout(context) {
     val isOpen: Boolean get() = opened
 
     /** Auswahl verschieben (mit Begrenzung, kein Umlauf – in langen Listen orientiert man sich am Rand). */
-    fun moveSelection(delta: Int) {
+    fun moveSelection(delta: Int, wrap: Boolean = false) {
         if (shown.isEmpty()) return
-        val n = (selected + delta).coerceIn(0, shown.size - 1)
+        val n = ListNav.move(selected, delta, shown.size, wrap)
         if (n == selected) return
         selected = n
         adapter.notifyDataSetChanged()

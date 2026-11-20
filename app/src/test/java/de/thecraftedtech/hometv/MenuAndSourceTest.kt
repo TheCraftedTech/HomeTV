@@ -41,7 +41,7 @@ class MenuNavigatorTest {
     private val nav = MenuNavigator(listOf(
         SettingsCategory("a", "A") { listOf(info, toggle, choiceItem, stepper, textItem, action) },
         SettingsCategory("b", "B") { listOf(SettingItem.Info("i2", "Zwei", { "2" })) },
-    ))
+    ), wrap = { false })
 
     private fun goToItem(index: Int) {
         nav.onNav(Nav.RIGHT)                       // Bereich -> Eintraege

@@ -1,15 +1,16 @@
 # Home TV
 
 Native Android-App (Kotlin, LibVLC) für **Amazon Fire TV**, die Live-TV direkt von einer **FRITZ!Box 6660 Cable** (DVB-C, SAT>IP) wiedergibt – ohne zusätzlichen Streamingserver und ohne Transkodierung.
-Entwickelt von Samuel · Paket `de.thecraftedtech.hometv` · **Version 1.4.0**.
+Entwickelt von Samuel · Paket `de.thecraftedtech.hometv` · **Version 1.5.0**.
 
-> ⚠️ **Teststatus:** Version 1.1.0 lief auf dem Fire TV (Bild, Ton, Synchronisation, ≈ 5 s bis zum Bild, gute Qualität). **Version 1.4.0 ist gebaut und ihre Logik unit-getestet (132 Tests), aber noch nicht auf dem Fire TV installiert.**
+> ⚠️ **Teststatus:** Version 1.1.0 lief auf dem Fire TV (Bild, Ton, Synchronisation, ≈ 5 s bis zum Bild, gute Qualität). **Version 1.5.0 ist gebaut und ihre Logik unit-getestet (155 Tests), aber noch nicht auf dem Fire TV installiert.**
 > Die neue Oberfläche habe ich nicht auf einem Fernseher gesehen. Details unter „Teststatus".
 
 ## Funktionen
 - Live-TV von der FRITZ!Box (97 Sender), Start mit dem zuletzt gesehenen Sender (oder Das Erste HD).
 - **Senderwechsel** mit CH+/CH− (und ▲/▼), Gedrückthalten = schneller durchschalten; sofortige Vorschau (Nummer, Name, aktuelle Sendung), geladen wird erst nach kurzer Entprellung → bei schnellem Umschalten startet genau **ein** Sender, alte Sessions werden sauber beendet.
 - **Senderliste** am rechten Rand (▶): alle Sender mit Nummer, Name und – wenn verfügbar – laufender Sendung; die Wiedergabe läuft beim Auswählen weiter.
+- **Anleitung mit Tastensymbolen** (Einstellungen → Anleitung), **Kanaltasten vertauschen**, Umspringen am Listenende, **Zurücksetzen** (mit Sicherheitsabfrage), zehn Einstellungsbereiche und eine **Favoriten-Leiste** (⏩).
 - **Programmübersicht** (Vollbild-Raster wie beim Fernseher: alle Sender, Gelaufenes/Laufendes/Kommendes auf einer Zeitachse) und **Favoriten** (★, Filter „nur Favoriten", CH± nur über Favoriten).
 - **Programmführer (EPG)** über eine frei einstellbare **XMLTV-URL**: lokal gecacht, bedingte Aktualisierung, Anzeige in Info-Leiste und Senderliste. Keine voreingestellte URL.
 - **Einstellungsmenü** (◀ oder Menü): Allgemein, Wiedergabe, Programmführer, Oberfläche, Debugging. Einträge werden markiert, mit OK angeklickt und dann bearbeitet; die **FRITZ!Box-Adresse** und eine **eigene Senderlisten-URL** (M3U mit rtsp-Adressen) sind einstellbar.
@@ -21,7 +22,7 @@ Entwickelt von Samuel · Paket `de.thecraftedtech.hometv` · **Version 1.4.0**.
 |---|---|
 | ▲/CH+ · ▼/CH− | Sender wechseln (halten = schneller) |
 | ▶ | Senderliste · **OK** in der Liste: Sender starten · **OK lang**: ★ Favorit |
-| OK lang | Programmübersicht |
+| OK lang / ⏪ | Programmübersicht · ⏩ Favoriten-Leiste |
 | ◀ oder Menü | Einstellungen |
 | OK | Info-Leiste mit Programm ein/aus · im Menü: Eintrag anklicken (Schalter umlegen, Wert bearbeiten) |
 | Play/Pause | Standbild / live neu starten |
@@ -65,7 +66,7 @@ Genaue Schritte, Signierschlüssel, Checkliste für den Fernseher und Entfernen 
 | Ebene | Status |
 |---|---|
 | Version 1.1.0 auf dem Fire TV: Bild, Ton, Synchronisation, Startzeit ≈ 5 s, Senderwechsel grundsätzlich | ✅ (vom Nutzer bestätigt) |
-| Unit-Tests: Senderwechsel/Abbruch, Zap-Entprellung, Halte-Beschleunigung, Einstellungen, Menümodell, XMLTV-Parser, Senderzuordnung, EPG-Cache und -Repository (lokaler HTTP-Server), Resequenzer, TS-Inspektor, Playlist | ✅ **132 Tests** |
+| Unit-Tests: Senderwechsel/Abbruch, Zap-Entprellung, Halte-Beschleunigung, Einstellungen, Menümodell, XMLTV-Parser, Senderzuordnung, EPG-Cache und -Repository (lokaler HTTP-Server), Resequenzer, TS-Inspektor, Playlist | ✅ **155 Tests** |
 | SAT>IP-Client gegen die echte FRITZ!Box (Laptop) | ✅ (1.1; 1.2 übernimmt den Client, Live-Test nur mit `HOMETV_LIVE_TEST=1`) |
 | Version 1.4.0: signierte Release-APK gebaut | ✅ `build\HomeTV.apk` |
 | Version 1.4.0 auf dem Fire TV installiert | ⬜ offen (nur durch dich) |

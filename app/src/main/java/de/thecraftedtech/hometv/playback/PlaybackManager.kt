@@ -70,6 +70,8 @@ class PlaybackManager(
     private var libVlc: LibVLC? = null
     private var player: MediaPlayer? = null
     private var handle: PlayHandle? = null
+    /** Generation des Mediums, dessen Player-Ereignisse gelten; -1 = keines (waehrend eines Senderwechsels werden Ereignisse des alten Mediums verworfen). */
+    @Volatile private var mediaGen = -1
 
     private var transport = Transport.TCP
     private val triedTransports = HashSet<Transport>()
@@ -131,7 +133,10 @@ class PlaybackManager(
         libVlc = vlc
         val mp = MediaPlayer(vlc)
         mp.attachViews(videoLayout, null, false, false)
-        mp.setEventListener { ev -> val g = coordinator.generation; main.post { if (g == coordinator.generation) onPlayerEvent(ev) } }
+        mp.setEventListener { ev ->
+            val g = mediaGen
+            if (g >= 0) main.post { if (g == coordinator.generation) onPlayerEvent(ev) }   // Ereignisse des alten Mediums (Ende/Fehler durch den Stopp) verwerfen
+        }
         player = mp
         applyVolume()
     }
@@ -139,6 +144,7 @@ class PlaybackManager(
     /** Beendet alles sofort (inkl. TEARDOWN) und gibt LibVLC frei – fuer onStop. */
     fun detach() {
         stopTimers()
+        mediaGen = -1
         awaitWorker(3_000)          // ein noch laufendes MediaPlayer.stop() auf dem Worker abwarten, bevor release() es ueberholt
         coordinator.stopNow()
         handle = null
@@ -176,15 +182,20 @@ class PlaybackManager(
         tuneStartedAt = System.currentTimeMillis()
         val ch = channels[index]
         AppLog.i(tag, "Sender ${index + 1}/${channels.size}: ${ch.name} (Modus ${transport.key}, Puffer ${settings.cacheMs} ms)")
+        // Beobachtung (Log 1.4.0): MediaPlayer.stop() dauert ~2 s, wenn Daten fliessen (Sender spielt), aber nur 0-7 ms, solange
+        // der Sender noch laedt. Test: lokalen TCP-Feed ZUERST schliessen (VLC liest dann sofort EOF statt auf Daten zu warten)
+        // und erst danach stoppen; beide Zeiten getrennt loggen. Laeuft auf dem Worker, nie im Haupt-Thread.
+        mediaGen = -1
+        val oldFeed = handle?.feed as? TcpFeed
+        val mp = player
         handle = null
         setState(State.LOADING)
-        // MediaPlayer.stop() blockiert auf dem Fire TV ~2 s (gemessen: Tastenlatenz 2027 ms im Systemlog, neue Session erst
-        // +1,9…2,3 s nach dem Sender-Start). Deshalb auf dem seriellen Worker statt im Haupt-Thread; die Dauer wird geloggt.
-        val mp = player
         coordinator.tune(index) {
             val t0 = System.currentTimeMillis()
+            runCatching { oldFeed?.close() }
+            val t1 = System.currentTimeMillis()
             runCatching { mp?.stop() }
-            AppLog.i(tag, "LibVLC-Stop (Worker-Thread) dauerte ${System.currentTimeMillis() - t0} ms")
+            AppLog.i(tag, "Stop: Feed zu ${t1 - t0} ms, LibVLC-Stop (Worker-Thread) ${System.currentTimeMillis() - t1} ms")
         }
     }
 
@@ -211,6 +222,7 @@ class PlaybackManager(
         media.setHWDecoderEnabled(true, false)         // Hardware bevorzugt, nicht erzwungen
         mp.media = media
         media.release()
+        mediaGen = gen
         mp.play()                                      // Player lauscht/verbindet, bevor die Box angefordert wird
         var session: SatIpSession? = null
         if (feed != null) {

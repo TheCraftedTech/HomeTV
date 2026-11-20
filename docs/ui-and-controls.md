@@ -1,4 +1,4 @@
-# Oberfläche und Fernbedienung (Version 1.4.0)
+# Oberfläche und Fernbedienung (Version 1.5.0)
 
 Leitgedanke: Das Fernsehbild steht im Mittelpunkt; alles andere erscheint nur bei Bedarf, ist groß und ruhig, und die Fernbedienung verhält sich wie bei einem Fernseher.
 **Status:** Die Oberfläche ist gebaut und kompiliert, die Logik (Senderwahl, Einstellungen, Menümodell) ist unit-getestet. **Wie sie auf dem Fernseher aussieht und sich anfühlt, habe ich nicht gesehen** –
@@ -28,10 +28,11 @@ Bewusst **keine** Android-Fokussteuerung: eine zentrale Tastenverteilung (`MainA
 ### Wiedergabe (nichts geöffnet)
 | Taste | Aktion |
 |---|---|
-| **▲ / CH+** | nächster Sender (Gedrückthalten: schneller durchschalten) |
-| **▼ / CH−** | vorheriger Sender |
+| **▲ / CH+** | nächster Sender (Gedrückthalten: schneller durchschalten; am Ende springt es auf Sender 1) – mit *Kanaltasten vertauschen* umgekehrt |
+| **▼ / CH−** | vorheriger Sender (ebenfalls umkehrbar) |
 | **▶ (rechts)** | Senderliste öffnen (rechts eingeblendet) |
-| **OK lange drücken** / Guide / TV | **Programmübersicht** (Vollbild-Raster) |
+| **OK lange drücken** / Rücklauf-Taste ⏪ / Guide / TV | **Programmübersicht** (Vollbild-Raster) |
+| **Vorlauf-Taste ⏩** | **Favoriten-Leiste** (nur Favoriten, Karten am unteren Rand) |
 | **◀ (links)** | Einstellungen öffnen (links eingeblendet) |
 | **OK** | Info-Leiste ein/aus (bei Fehleranzeige: erneut versuchen) |
 | **Menü** (kurz) | Einstellungen |
@@ -83,6 +84,21 @@ Die Bedienlogik steckt in `settings/MenuNavigator` (ohne Android, 14 Unit-Tests)
 | **Menü** | Favoriten-Filter ein/aus |
 | Zurück | schließen |
 
+### Favoriten-Leiste (ab 1.5.0)
+Karten für alle Favoriten (Nummer, Name, laufende Sendung, Fortschrittsbalken, ★), die gewählte ist größer und blau, der laufende Sender trägt „● LÄUFT". Das Fernsehbild bleibt sichtbar.
+| Taste | Aktion |
+|---|---|
+| ◀ ▶ (auch ▲ ▼) | Favorit wählen; am Rand springt es auf die andere Seite |
+| OK (kurz) | Sender ansehen |
+| OK lange drücken | aus den Favoriten entfernen |
+| Zurück / Menü | schließen (sonst nach der eingestellten Zeit automatisch) |
+
+### Anleitung (Einstellungen → Anleitung → Tastenbelegung anzeigen)
+Fünf Seiten (Fernsehbild, Senderliste, Programmübersicht, Favoriten-Leiste, Einstellungen) mit **selbst gezeichneten Tastensymbolen** (Pfeile, OK, Zurück, Menü, Play/Pause, Vor-/Rücklauf, CH+/CH−; lange Druck = amberfarbener Ring + „lang"). ◀ ▶ blättert, Zurück schließt. Die Seite „Fernsehbild" passt sich an *Kanaltasten vertauschen* an.
+
+### Listen-Navigation
+In Senderliste, Programmübersicht, Favoriten-Leiste und Einstellungen **springt ▲ ganz oben auf das Ende und umgekehrt – aber nur bei einem neuen Tastendruck**, nicht beim Gedrückthalten (sonst schießt man beim schnellen Scrollen über das Ende hinaus). Abschaltbar: *Einstellungen → Bedienung → Am Listenende umspringen*. Das Umschalten im Fernsehbild springt immer um. Bild ↑/↓ springen nie um.
+
 ## Senderwechsel („schnelles Umschalten")
 1. Jeder Druck auf CH+/CH−/▲/▼ ändert sofort die **vorgemerkte Auswahl** und blendet Nummer, Sendername und (bei aktivem Programmführer) die aktuelle Sendung ein – **noch bevor** etwas geladen wird.
 2. Geladen wird erst, wenn **300 ms** (einstellbar 150–800 ms) keine weitere Taste kam. Fünfmal CH+ innerhalb kurzer Zeit startet also genau **einen** Sender, den fünften.
@@ -112,14 +128,21 @@ Unten, 5 s sichtbar (3/5/8/12 s einstellbar), bleibt während des Ladens stehen 
 und – wenn der Programmführer aktiv ist – laufende Sendung mit Zeit, Fortschrittsbalken, Kurzbeschreibung und „Danach". Ohne Programmführer erscheint nur Nummer und Name.
 Aktualisiert sich alle 20 s (Fortschritt, Wechsel der Sendung).
 
-## Einstellungsmenü
+## Einstellungsmenü (zehn Bereiche seit 1.5.0)
 | Bereich | Einträge |
 |---|---|
-| Allgemein | Version (nur die Nummer) · **Entwickler: Samuel Zenker** · Sender (Anzahl/Quelle) · **FRITZ!Box-Adresse** (Standard 192.168.200.1) · **Eigene Senderlisten-URL** (leer = FRITZ!Box) · Beim Start letzter Sender · **Automatisch beenden nach** (Aus/1–12 h) · Senderliste neu laden |
-| Wiedergabe | Puffer (1000/2000/3000/5000 ms) · Audio-Versatz · Übergabemodus (TCP/UDP/direkt) · Start-Gate · Umschalt-Wartezeit |
-| Programmführer | Status · Ein/Aus · XMLTV-URL · Jetzt aktualisieren · Letzte Aktualisierung · Zugeordnete Sender · Zwischenspeicher · Automatisch aktualisieren · Intervall · Tage im Voraus · Zwischenspeicher löschen |
-| Oberfläche | Info-Leiste Anzeigedauer · Senderliste schließt nach · Programm beim Umschalten · Programm in der Senderliste |
+| Allgemein | Version (nur die Nummer) · **Entwickler: Samuel Zenker** · Beim Start letzter Sender · Automatisch beenden nach (Aus/1–12 h) |
+| Sender | Senderliste (Anzahl/Quelle) · **FRITZ!Box-Adresse** (Standard 192.168.200.1) · **Eigene Senderlisten-URL** (leer = FRITZ!Box) · Senderliste neu laden |
+| Favoriten | Favoriten öffnen · Nur Favoriten · Anzahl · Alle Favoriten entfernen (mit Sicherheitsabfrage) |
+| Bedienung | **Kanaltasten vertauschen** · **Am Listenende umspringen** · Umschalt-Wartezeit · Senderliste schließt nach |
+| Wiedergabe | Puffer (1000/2000/3000/5000 ms) · Audio-Versatz · Übergabemodus (TCP/UDP/direkt) · Start-Gate |
+| Programmführer | Programmübersicht öffnen · Status · Ein/Aus · XMLTV-URL · Jetzt aktualisieren · Letzte Aktualisierung · Zugeordnete Sender · Zwischenspeicher · Automatisch aktualisieren · Intervall · Tage im Voraus · Zwischenspeicher löschen |
+| Oberfläche | Info-Leiste Anzeigedauer · Programm beim Umschalten · Programm in der Senderliste |
+| Anleitung | **Tastenbelegung anzeigen** (mit Symbolen) · Kurzübersicht der wichtigsten Tasten |
+| Zurücksetzen | **Einstellungen zurücksetzen** (Favoriten + letzter Sender bleiben) · **Werkseinstellungen** (alles, inkl. Favoriten und Programmdaten) – beide mit Sicherheitsabfrage, Standardauswahl „Abbrechen" |
 | Debugging | **Debug-Modus (Standard: aus)** · Debug-Overlay anzeigen · Bedienhinweis · Log-Datei |
+
+**Kanaltasten vertauschen:** ▲/CH+ schaltet dann zum vorigen, ▼/CH− zum nächsten Sender (gilt im Fernsehbild; Listen bleiben unverändert, dort wandert ▲ immer nach oben).
 
 Wiedergabe-Einstellungen (Puffer/Modus/Gate) wirken beim Schließen des Menüs (der aktuelle Sender startet dann neu); der Audio-Versatz wirkt sofort.
 Alle bisherigen Einstellungen (Puffer, Audio-Versatz, Übergabemodus) behalten ihre Speicherschlüssel – ein Update übernimmt sie.

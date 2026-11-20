@@ -96,7 +96,7 @@ class GuideView(context: Context) : View(context) {
 
     fun forceClose() { opened = false; removeCallbacks(ticker); animate().cancel(); visibility = GONE; alpha = 1f }
 
-    fun moveRow(d: Int) { if (nav.moveRow(d)) invalidate() }
+    fun moveRow(d: Int, wrap: Boolean = false) { if (nav.moveRow(d, wrap)) invalidate() }
     fun moveTime(d: Int) { if (nav.moveTime(d)) invalidate() }
     fun jump(ms: Long) { if (nav.jump(ms)) invalidate() }
     fun refresh() { if (opened) invalidate() }

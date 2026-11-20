@@ -1,5 +1,7 @@
 package de.thecraftedtech.hometv.epg
 
+import de.thecraftedtech.hometv.core.ListNav
+
 /**
  * Bedienlogik der Programmuebersicht (Raster: Zeilen = Sender, waagerecht = Zeit) – ohne Android, damit testbar.
  *
@@ -43,9 +45,9 @@ class GuideNavigator(
     /** Ausgewaehlte Sendung (null = in dieser Zeile laeuft zu [anchor] nichts bzw. es gibt keine Daten). */
     fun selected(): Programme? = at(row, anchor)
 
-    /** @return true, wenn sich die Zeile geaendert hat. Kein Umlauf – am Rand bleibt die Auswahl stehen. */
-    fun moveRow(delta: Int): Boolean {
-        val n = (row + delta).coerceIn(0, lastRow())
+    /** @return true, wenn sich die Zeile geaendert hat. Mit [wrap] springt ein Schritt ueber den Rand auf die andere Seite, sonst bleibt die Auswahl stehen. */
+    fun moveRow(delta: Int, wrap: Boolean = false): Boolean {
+        val n = ListNav.move(row, delta, rowCount(), wrap)
         if (n == row) return false
         row = n
         return true

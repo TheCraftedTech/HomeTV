@@ -1,4 +1,4 @@
-# Architektur (Version 1.4.0)
+# Architektur (Version 1.5.0)
 
 ## Vorher (1.1.0)
 Eine `MainActivity` (~450 Zeilen) enthielt Wiedergabe, Senderwechsel, Overlay, Tasten, Einstellungen und Logging. Neue Funktionen (Senderliste, EPG, Menü) hätten sie unwartbar gemacht.
@@ -7,7 +7,7 @@ Eine `MainActivity` (~450 Zeilen) enthielt Wiedergabe, Senderwechsel, Overlay, T
 
 ```
 MainActivity (Host: Lebenszyklus, Tastenverteilung, verbindet die Bausteine)
- ├─ ui/            InfoBarView · ChannelListView · GuideView (Programmübersicht) · MenuView · Overlays (Debug, Lautstärke, Meldung) · Ui (Designsystem)
+ ├─ ui/            InfoBarView · ChannelListView · GuideView (Programmübersicht) · FavoritesStripView · HelpView/HelpContent (Anleitung) · MenuView · Overlays (Debug, Lautstärke, Meldung) · Ui (Designsystem)
  ├─ zap/           ZapController (Vorschau + Entprellung) · HoldTracker (Halte-Beschleunigung)
  ├─ playback/      PlaybackManager (LibVLC, Zustände, Fallbacks, Messwerte) · TuneCoordinator (Abbruch/Serialisierung) · DecoderProbe
  ├─ satip/         SatIpSession (RTSP/RTP) · RtpResequencer · TsInspector · LocalFeed (TCP/UDP-Loopback)
@@ -61,13 +61,14 @@ Fallback-Kette TCP → UDP → direkt) wurde aus Version 1.1.0 übernommen, die 
 2. Handshake-Abbruch zwischen den RTSP-Schritten, Start-Gate abschaltbar (Standard an), Zeitstempel der Startphasen.
 3. Einstellungsschlüssel `cacheMs`, `audioDelayMs`, `transport` unverändert → bestehende Werte bleiben erhalten.
 
-## Testabdeckung (132 Unit-Tests + 2 Live-Tests)
+## Testabdeckung (155 Unit-Tests + 2 Live-Tests)
 | Bereich | Tests |
 |---|---|
 | Resequenzer, TS-Inspektor | `ResequencerTest` (8), `TsInspectorTest` (5) |
 | Senderliste | `PlaylistTest` (3), `PlaylistAttributeTest` (1) |
 | Senderwechsel/Zap | `ZapControllerTest` (9, virtuelle Uhr), `HoldTrackerTest` (3), `TuneCoordinatorTest` (6: nur neuester startet, Stop vor Start, nie zwei Sessions, `stopNow`, Generationen) |
 | Einstellungen | `AppSettingsTest` (6), `SettingsModelTest` (10): Defaults, Persistenz, Schlüssel-Kompatibilität 1.1, Wertebereiche, Debug-Sperre |
+| Listen-Navigation, Umspringen, Zurücksetzen, Anleitung | `ListNavTest` (5), `WrapAndConfirmTest` (6), `ResetAndControlsSettingsTest` (7), `HelpContentTest` (4), `GuideWrapTest` (1) |
 | Programmübersicht, Favoriten | `GuideNavigatorTest` (9), `ChannelFilterTest` (3), `FavoritesSettingsTest` (3), `ZapFavouritesTest` (4: CH± überspringt Nicht-Favoriten, `select` nie gefiltert) |
 | Menü-Bedienung, Senderquelle | `MenuNavigatorTest` (14: markieren ändert nichts, OK klickt an, Bearbeiten-Modus, Zurück-Ebenen), `SourceSettingsTest` (4), `PlaylistSourceTest` (6, lokaler Testserver), `RemainingTextTest` (1) |
 | EPG | `XmltvTimeTest` (5), `XmltvParserTest` (5), `EpgMatcherTest` (9), `EpgDataTest` (5), `EpgRepositoryTest` (10) |

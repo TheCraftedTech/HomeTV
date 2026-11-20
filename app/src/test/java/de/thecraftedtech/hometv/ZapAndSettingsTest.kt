@@ -297,7 +297,7 @@ class SettingsModelTest {
 
     @Test fun hasAllRequestedCategories() {
         val m = model(AppSettings(MemoryStore()))
-        assertEquals(listOf("Allgemein", "Wiedergabe", "Programmführer", "Oberfläche", "Debugging"), m.categories.map { it.title })
+        assertEquals(listOf("Allgemein", "Sender", "Favoriten", "Bedienung", "Wiedergabe", "Programmführer", "Oberfläche", "Anleitung", "Zurücksetzen", "Debugging"), m.categories.map { it.title })
     }
 
     @Test fun toggleChangesAndPersists() {

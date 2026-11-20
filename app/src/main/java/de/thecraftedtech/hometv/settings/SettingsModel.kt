@@ -62,8 +62,11 @@ sealed class SettingItem(val id: String, val label: String, val help: String = "
         }
     }
 
-    class Action(id: String, label: String, private val run: () -> Unit, private val isEnabled: () -> Boolean = { true }, help: String = "") :
-        SettingItem(id, label, help) {
+    /** @param confirm  wenn gesetzt, fragt die Oberflaeche vor dem Ausfuehren nach (Text der Sicherheitsabfrage). */
+    class Action(
+        id: String, label: String, private val run: () -> Unit, private val isEnabled: () -> Boolean = { true }, help: String = "",
+        val confirm: String? = null,
+    ) : SettingItem(id, label, help) {
         override val enabled get() = isEnabled()
         override fun display() = ""
         override fun activate(): Boolean { if (enabled) run(); return false }
@@ -97,6 +100,10 @@ class SettingsEnv(
     val logPath: String,
     /** Programmuebersicht (Vollbild-Raster) oeffnen. */
     val openGuide: () -> Unit = {},
+    /** Favoriten-Leiste oeffnen. */
+    val openFavorites: () -> Unit = {},
+    /** Anleitung (Tastenbelegung mit Symbolen) oeffnen. */
+    val openHelp: () -> Unit = {},
 )
 
 class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
@@ -105,22 +112,51 @@ class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
         const val DEVELOPER = "Samuel Zenker"
     }
 
+    private fun guideHelp() = "Zeigt alle Sender mit dem Programm – Gelaufenes, Laufendes und Kommendes – als Raster. Sonst: Senderliste ►, OK lange drücken oder Rücklauf-Taste."
+
     val categories: List<SettingsCategory> = listOf(
         SettingsCategory("general", "Allgemein") {
             listOf(
                 SettingItem.Info("version", "Version", { env.versionText }),
                 SettingItem.Info("developer", "Entwickler", { DEVELOPER }),
-                SettingItem.Info("channels", "Sender", env.channelInfo),
+                SettingItem.Toggle("startLast", "Beim Start letzter Sender", { s.startWithLastChannel }, { s.startWithLastChannel = it },
+                    "Ein: Home TV startet mit dem zuletzt gesehenen Sender, sonst mit Das Erste HD."),
+                SettingItem.Choice("idle", "Automatisch beenden nach", listOf(0, 1, 2, 4, 6, 8, 12).map { (if (it == 0) "Aus" else "$it h") to it }, { s.idleStopHours }, { s.idleStopHours = it },
+                    "Beendet die Wiedergabe nach dieser Zeit ohne jede Tastenbetätigung (gibt den Tuner der FRITZ!Box frei, z. B. wenn der Fernseher ausgeschaltet wurde). Aus = nie."),
+            )
+        },
+        SettingsCategory("source", "Sender") {
+            listOf(
+                SettingItem.Info("channels", "Senderliste", env.channelInfo),
                 SettingItem.Text("host", "FRITZ!Box-Adresse", { s.fritzboxHost }, { s.fritzboxHost = it }, "z. B. ${s.defaultHost}",
                     "Adresse der FRITZ!Box mit DVB-C-Tuner (Standard ${s.defaultHost}). Gilt nur, wenn keine eigene Senderlisten-URL gesetzt ist."),
                 SettingItem.Text("playlistUrl", "Eigene Senderlisten-URL", { s.playlistUrl }, { s.playlistUrl = it }, "http://…/liste.m3u",
                     "Optional: eigene M3U-Liste (http/https) mit rtsp://-SAT>IP-Adressen. Leer lassen = Senderliste der FRITZ!Box.",
                     emptyText = "FRITZ!Box verwenden"),
-                SettingItem.Toggle("startLast", "Beim Start letzter Sender", { s.startWithLastChannel }, { s.startWithLastChannel = it },
-                    "Ein: Home TV startet mit dem zuletzt gesehenen Sender, sonst mit Das Erste HD."),
-                SettingItem.Choice("idle", "Automatisch beenden nach", listOf(0, 1, 2, 4, 6, 8, 12).map { (if (it == 0) "Aus" else "$it h") to it }, { s.idleStopHours }, { s.idleStopHours = it },
-                    "Beendet die Wiedergabe nach dieser Zeit ohne jede Tastenbetätigung (gibt den Tuner der FRITZ!Box frei, z. B. wenn der Fernseher ausgeschaltet wurde). Aus = nie."),
                 SettingItem.Action("reload", "Senderliste neu laden", env.reloadChannels, help = "Lädt die Senderliste erneut (von der FRITZ!Box bzw. der eigenen URL)."),
+            )
+        },
+        SettingsCategory("favorites", "Favoriten") {
+            listOf(
+                SettingItem.Action("openFavorites", "Favoriten öffnen", env.openFavorites, { s.favorites.isNotEmpty() },
+                    "Zeigt deine Favoriten als Leiste am unteren Rand. Schnell erreichbar mit der Vorlauf-Taste im Fernsehbild."),
+                SettingItem.Toggle("favOnly", "Nur Favoriten", { s.favoritesOnly }, { s.favoritesOnly = it },
+                    "Senderliste, Programmübersicht und CH+/CH− zeigen nur Favoriten (sobald es welche gibt). In Liste/Übersicht: Menü-Taste."),
+                SettingItem.Info("favCount", "Anzahl Favoriten", { if (s.favorites.isEmpty()) "keine" else "${s.favorites.size}" },
+                    "Favoriten setzen: in Senderliste oder Programmübersicht OK lange drücken (★)."),
+                SettingItem.Action("favClear", "Alle Favoriten entfernen", { s.clearFavorites() }, { s.favorites.isNotEmpty() },
+                    confirm = "Alle Favoriten entfernen?"),
+            )
+        },
+        SettingsCategory("controls", "Bedienung") {
+            listOf(
+                SettingItem.Toggle("invertKeys", "Kanaltasten vertauschen", { s.invertChannelKeys }, { s.invertChannelKeys = it },
+                    "Ein: ▲ / CH+ schaltet zum vorigen, ▼ / CH− zum nächsten Sender (wenn man sich oft vertippt). Gilt im Fernsehbild."),
+                SettingItem.Toggle("wrapLists", "Am Listenende umspringen", { s.wrapLists }, { s.wrapLists = it },
+                    "Ein: ▲ ganz oben springt nach ganz unten und umgekehrt (nur bei einem neuen Tastendruck, nicht beim Halten). Das Umschalten im Fernsehbild springt immer um."),
+                SettingItem.Choice("debounce", "Umschalt-Wartezeit", listOf(150, 300, 500, 800).map { "$it ms" to it }, { s.zapDebounceMs }, { s.zapDebounceMs = it },
+                    "Wartezeit nach der letzten Kanaltaste, bevor der Sender geladen wird (verhindert unnötige Ladeversuche)."),
+                SettingItem.Choice("listSecs", "Senderliste schließt nach", listOf(10, 15, 30, 60, 0).map { (if (it == 0) "nie" else "$it s") to it }, { s.channelListTimeoutSeconds }, { s.channelListTimeoutSeconds = it }),
             )
         },
         SettingsCategory("playback", "Wiedergabe") {
@@ -133,13 +169,11 @@ class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
                     "Wie der Datenstrom an den Player geht. TCP ist verlustfrei; die anderen Modi dienen als Rückfall."),
                 SettingItem.Toggle("gate", "Start-Gate", { s.startGate }, { s.startGate = it },
                     "Ein: überspringt die beschädigte erste Sekunde jedes Sender-Starts (ca. 1,5 s länger, aber sauberes Bild)."),
-                SettingItem.Choice("debounce", "Umschalt-Wartezeit", listOf(150, 300, 500, 800).map { "$it ms" to it }, { s.zapDebounceMs }, { s.zapDebounceMs = it },
-                    "Wartezeit nach der letzten Kanaltaste, bevor der Sender geladen wird (verhindert unnötige Ladeversuche)."),
             )
         },
         SettingsCategory("epg", "Programmführer") {
             listOf(
-                SettingItem.Action("openGuide", "Programmübersicht öffnen", env.openGuide, help = "Zeigt alle Sender mit dem Programm – Gelaufenes, Laufendes und Kommendes – als Raster. Sonst: Senderliste ►, oder OK lange drücken."),
+                SettingItem.Action("openGuide", "Programmübersicht öffnen", env.openGuide, help = guideHelp()),
                 SettingItem.Info("epgStatus", "Status", env.epgStatus),
                 SettingItem.Toggle("epgOn", "Programmführer", { s.epgEnabled }, { s.epgEnabled = it }, "Aus: keine Programmdaten anzeigen und nichts herunterladen."),
                 SettingItem.Text("epgUrl", "XMLTV-URL", { s.epgUrl }, { s.epgUrl = it }, "https://…/epg.xml oder .xml.gz",
@@ -158,14 +192,27 @@ class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
         SettingsCategory("ui", "Oberfläche") {
             listOf(
                 SettingItem.Choice("infoSecs", "Info-Leiste anzeigen für", listOf(3, 5, 8, 12).map { "$it s" to it }, { s.infoBarSeconds }, { s.infoBarSeconds = it }),
-                SettingItem.Choice("listSecs", "Senderliste schließt nach", listOf(10, 15, 30, 60, 0).map { (if (it == 0) "nie" else "$it s") to it }, { s.channelListTimeoutSeconds }, { s.channelListTimeoutSeconds = it }),
                 SettingItem.Toggle("epgOnZap", "Programm beim Umschalten", { s.showEpgOnZap }, { s.showEpgOnZap = it }, "Zeigt beim Senderwechsel sofort die aktuelle Sendung."),
                 SettingItem.Toggle("epgInList", "Programm in der Senderliste", { s.showEpgInChannelList }, { s.showEpgInChannelList = it }),
-                SettingItem.Toggle("favOnly", "Nur Favoriten", { s.favoritesOnly }, { s.favoritesOnly = it },
-                    "Senderliste, Programmübersicht und CH+/CH− zeigen nur Favoriten (sobald es welche gibt). In Liste/Übersicht: Menü-Taste."),
-                SettingItem.Info("favCount", "Favoriten", { if (s.favorites.isEmpty()) "keine" else "${s.favorites.size}" },
-                    "Favoriten setzen: in Senderliste oder Programmübersicht OK lange drücken (★)."),
-                SettingItem.Action("favClear", "Alle Favoriten entfernen", { s.clearFavorites() }, { s.favorites.isNotEmpty() }),
+            )
+        },
+        SettingsCategory("help", "Anleitung") {
+            listOf(
+                SettingItem.Action("openHelp", "Tastenbelegung anzeigen", env.openHelp, help = "Zeigt mit Symbolen, welche Taste der Fernbedienung was bedient – für Fernsehbild, Listen, Programmübersicht und Einstellungen."),
+                SettingItem.Info("tipOkLong", "OK lange drücken", { "Programmübersicht" }, "Im Fernsehbild. In Senderliste und Programmübersicht setzt es stattdessen einen ★ Favoriten."),
+                SettingItem.Info("tipFf", "Vorlauf-Taste", { "Favoriten" }, "Öffnet die Favoriten-Leiste (die Rücklauf-Taste öffnet die Programmübersicht)."),
+                SettingItem.Info("tipMenu", "Menü-Taste", { "Einstellungen" }, "In Senderliste und Programmübersicht schaltet sie den Filter „nur Favoriten“ um."),
+                SettingItem.Info("tipRight", "Pfeil rechts / links", { "Liste / Einstellungen" }, "Im Fernsehbild: ▶ Senderliste, ◀ Einstellungen."),
+            )
+        },
+        SettingsCategory("reset", "Zurücksetzen") {
+            listOf(
+                SettingItem.Action("resetSettings", "Einstellungen zurücksetzen", { s.resetSettings() },
+                    help = "Setzt alle Einstellungen auf Standard (Puffer, Tasten, Senderquelle, Programmführer …). Favoriten und der zuletzt gesehene Sender bleiben erhalten.",
+                    confirm = "Alle Einstellungen auf Standard zurücksetzen? Favoriten bleiben erhalten."),
+                SettingItem.Action("resetAll", "Werkseinstellungen", { s.resetAll() },
+                    help = "Löscht wirklich alles: Einstellungen, Favoriten, zuletzt gesehenen Sender und die gespeicherten Programmdaten.",
+                    confirm = "Alles zurücksetzen – inklusive Favoriten und Programmdaten?"),
             )
         },
         SettingsCategory("debug", "Debugging") {

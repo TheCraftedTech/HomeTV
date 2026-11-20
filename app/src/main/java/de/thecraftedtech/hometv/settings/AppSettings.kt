@@ -27,6 +27,8 @@ interface KeyValueStore {
     fun putLong(key: String, value: Long)
     fun putBoolean(key: String, value: Boolean)
     fun remove(key: String)
+    /** Alle gespeicherten Werte loeschen. */
+    fun clear()
 }
 
 class SharedPrefsStore(context: Context, name: String = "hometv") : KeyValueStore {
@@ -40,6 +42,7 @@ class SharedPrefsStore(context: Context, name: String = "hometv") : KeyValueStor
     override fun putLong(key: String, value: Long) { sp.edit().putLong(key, value).apply() }
     override fun putBoolean(key: String, value: Boolean) { sp.edit().putBoolean(key, value).apply() }
     override fun remove(key: String) { sp.edit().remove(key).apply() }
+    override fun clear() { sp.edit().clear().apply() }
 }
 
 class MemoryStore(val map: MutableMap<String, Any?> = HashMap()) : KeyValueStore {
@@ -52,6 +55,7 @@ class MemoryStore(val map: MutableMap<String, Any?> = HashMap()) : KeyValueStore
     override fun putLong(key: String, value: Long) { map[key] = value }
     override fun putBoolean(key: String, value: Boolean) { map[key] = value }
     override fun remove(key: String) { map.remove(key) }
+    override fun clear() { map.clear() }
 }
 
 /**
@@ -129,6 +133,29 @@ class AppSettings(private val store: KeyValueStore, val defaultHost: String = DE
     var showEpgInChannelList: Boolean
         get() = store.getBoolean("showEpgInChannelList", true)
         set(v) = store.putBoolean("showEpgInChannelList", v)
+
+    // ---- Bedienung ----
+    /** Kanaltasten (▲/▼ und CH+/CH-) im Fernsehbild vertauschen: ▲ schaltet dann zum vorigen statt zum naechsten Sender. */
+    var invertChannelKeys: Boolean
+        get() = store.getBoolean("invertChannelKeys", false)
+        set(v) = store.putBoolean("invertChannelKeys", v)
+
+    /** Am Anfang/Ende von Listen mit einem weiteren Druck auf die andere Seite springen (nur bei neuem Tastendruck, nicht beim Halten). */
+    var wrapLists: Boolean
+        get() = store.getBoolean("wrapLists", true)
+        set(v) = store.putBoolean("wrapLists", v)
+
+    /** Alle Einstellungen auf Standard; Favoriten und zuletzt gesehener Sender bleiben erhalten. */
+    fun resetSettings() {
+        val fav = store.getString("favorites", "").orEmpty()
+        val last = store.getString("lastChannelName", null)
+        store.clear()
+        if (fav.isNotEmpty()) store.putString("favorites", fav)
+        if (last != null) store.putString("lastChannelName", last)
+    }
+
+    /** Werkseinstellungen: wirklich alles (Einstellungen, Favoriten, letzter Sender, EPG-Status). */
+    fun resetAll() = store.clear()
 
     // ---- Favoriten ----
     /** Favoriten als Sendernamen (eine Zeile je Sender gespeichert). */

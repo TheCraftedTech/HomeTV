@@ -28,7 +28,7 @@ import de.thecraftedtech.hometv.settings.SettingsCategory
  *  - amber = "angeklickt"/Bearbeiten-Modus (◄► aendert den Wert, OK/Zurueck beendet)
  *  - gruen/grau = Schalter Ein/Aus
  */
-class MenuView(context: Context, private val categories: List<SettingsCategory>) : FrameLayout(context) {
+class MenuView(context: Context, private val categories: List<SettingsCategory>, wrap: () -> Boolean = { true }) : FrameLayout(context) {
 
     interface Callbacks {
         fun onClose()
@@ -36,11 +36,13 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
         fun onEditText(item: SettingItem.Text)
         /** Ein Wert wurde geaendert (oder eine Aktion ausgefuehrt). */
         fun onItemChanged(item: SettingItem)
+        /** Sicherheitsabfrage zeigen; bei "Ja" [proceed] aufrufen. */
+        fun onConfirm(item: SettingItem.Action, proceed: () -> Unit)
     }
 
     var callbacks: Callbacks? = null
 
-    private val nav = MenuNavigator(categories)
+    private val nav = MenuNavigator(categories, wrap)
 
     private val catList = ListView(context)
     private val itemList = ListView(context)
@@ -146,6 +148,9 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
         nav.reload()
         catAdapter.notifyDataSetChanged()
         itemAdapter.notifyDataSetChanged()
+        // lange Bereichsliste: ausgewaehlten Bereich im Sichtbereich halten
+        val catStep = catRowH + context.dp(2)
+        if (catList.height > 0 && categories.size * catStep > catList.height) catList.setSelectionFromTop(nav.catIndex, (catList.height / 2 - catRowH / 2).coerceAtLeast(0))
         val item = nav.currentItem
         help.text = if (nav.mode == Mode.CATEGORIES) "" else item?.help.orEmpty()
         controls.text = controlsHint(item)
@@ -184,7 +189,7 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
         }
         // Gehaltenes OK/Zurueck darf nichts mehrfach ausloesen (Schalter, Dialoge, Ebenenwechsel)
         if (repeatCount > 0 && (n == Nav.OK || n == Nav.BACK || n == Nav.MENU)) return true
-        handle(nav.onNav(n))
+        handle(nav.onNav(n, fresh = repeatCount == 0))
         return true
     }
 
@@ -194,6 +199,7 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
             Effect.Redraw -> refresh()
             Effect.Close -> callbacks?.onClose()
             is Effect.EditText -> callbacks?.onEditText(e.item)
+            is Effect.Confirm -> callbacks?.onConfirm(e.item) { handle(nav.confirmed(e.item)) }
             is Effect.Changed -> {
                 refresh()
                 if (e.changed || e.item is SettingItem.Action) callbacks?.onItemChanged(e.item)
