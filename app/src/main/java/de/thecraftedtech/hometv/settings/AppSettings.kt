@@ -60,7 +60,20 @@ class MemoryStore(val map: MutableMap<String, Any?> = HashMap()) : KeyValueStore
  *
  * Zum Testen per ADB ueberschreibbar (siehe [applyIntent]).
  */
-class AppSettings(private val store: KeyValueStore) {
+class AppSettings(private val store: KeyValueStore, val defaultHost: String = DEFAULT_HOST) {
+
+    // ---- Senderquelle ----
+    /** Adresse der FRITZ!Box (nur Host/IP). Leer gespeichert = Standard ([defaultHost]). */
+    var fritzboxHost: String
+        get() = store.getString("fritzboxHost", "").orEmpty().ifBlank { defaultHost }
+        set(v) = store.putString("fritzboxHost", normalizeHost(v).takeIf { it != defaultHost }.orEmpty())
+
+    /** Eigene M3U-Adresse (http/https). Leer = Senderliste der FRITZ!Box verwenden. Die Eintraege muessen rtsp://-SAT>IP-Adressen sein. */
+    var playlistUrl: String
+        get() = store.getString("playlistUrl", "").orEmpty()
+        set(v) = store.putString("playlistUrl", v.trim())
+
+    val customPlaylist: Boolean get() = playlistUrl.isNotBlank()
 
     // ---- Wiedergabe (unveraendert seit 1.1) ----
     var cacheMs: Int
@@ -168,6 +181,8 @@ class AppSettings(private val store: KeyValueStore) {
         if (intent.hasExtra("audioDelayMs")) audioDelayMs = intent.getIntExtra("audioDelayMs", 0)
         Transport.fromKey(intent.getStringExtra("transport"))?.let { transport = it }
         if (intent.hasExtra("debug")) debugMode = intent.getBooleanExtra("debug", false)
+        intent.getStringExtra("fritzboxHost")?.let { fritzboxHost = it }
+        intent.getStringExtra("playlistUrl")?.let { playlistUrl = it }
         intent.getStringExtra("epgUrl")?.let { epgUrl = it }
         intent.getStringExtra("epgMap")?.let { epgOverrides = it.replace("\\n", "\n") }   // "Sendername=XMLTV-ID" je Zeile (\n als Trenner)
     }
@@ -178,5 +193,10 @@ class AppSettings(private val store: KeyValueStore) {
         const val K_TRANSPORT = "transport"
         val CACHE_PRESETS = listOf(1000, 2000, 3000, 5000)
         const val DEFAULT_CACHE_MS = 2000
+        const val DEFAULT_HOST = "192.168.200.1"
+
+        /** "http://192.168.178.1/x" -> "192.168.178.1" (nur Host bzw. Host:Port). */
+        fun normalizeHost(s: String): String =
+            s.trim().removePrefix("http://").removePrefix("https://").substringBefore('/').trim()
     }
 }

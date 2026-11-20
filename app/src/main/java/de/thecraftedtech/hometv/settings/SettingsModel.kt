@@ -5,7 +5,7 @@ package de.thecraftedtech.hometv.settings
  * ([de.thecraftedtech.hometv.ui.MenuView]) zeigt nur an und ruft [SettingItem.activate]/[SettingItem.adjust] auf.
  */
 sealed class SettingItem(val id: String, val label: String, val help: String = "") {
-    /** Aenderbar mit Links/Rechts? */
+    /** Wert aenderbar (Schalter, Auswahl, Zahl)? Schalter wechseln mit OK sofort, Auswahl/Zahl werden mit OK zum Bearbeiten "angeklickt". */
     open val adjustable: Boolean get() = false
     /** Wert fuer die Anzeige rechts. */
     abstract fun display(): String
@@ -70,9 +70,11 @@ sealed class SettingItem(val id: String, val label: String, val help: String = "
     }
 
     /** Textfeld (z. B. URL) – die Oberflaeche oeffnet dafuer einen Eingabedialog und ruft danach [commit] auf. */
-    class Text(id: String, label: String, private val get: () -> String, private val set: (String) -> Unit, val hint: String, help: String = "") :
-        SettingItem(id, label, help) {
-        override fun display() = get().ifBlank { "nicht gesetzt" }
+    class Text(
+        id: String, label: String, private val get: () -> String, private val set: (String) -> Unit, val hint: String, help: String = "",
+        private val emptyText: String = "nicht gesetzt",
+    ) : SettingItem(id, label, help) {
+        override fun display() = get().ifBlank { emptyText }
         val current: String get() = get()
         fun commit(value: String) = set(value)
     }
@@ -97,16 +99,26 @@ class SettingsEnv(
 
 class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
 
+    companion object {
+        const val DEVELOPER = "Samuel Zenker"
+    }
+
     val categories: List<SettingsCategory> = listOf(
         SettingsCategory("general", "Allgemein") {
             listOf(
                 SettingItem.Info("version", "Version", { env.versionText }),
+                SettingItem.Info("developer", "Entwickler", { DEVELOPER }),
                 SettingItem.Info("channels", "Sender", env.channelInfo),
+                SettingItem.Text("host", "FRITZ!Box-Adresse", { s.fritzboxHost }, { s.fritzboxHost = it }, "z. B. ${s.defaultHost}",
+                    "Adresse der FRITZ!Box mit DVB-C-Tuner (Standard ${s.defaultHost}). Gilt nur, wenn keine eigene Senderlisten-URL gesetzt ist."),
+                SettingItem.Text("playlistUrl", "Eigene Senderlisten-URL", { s.playlistUrl }, { s.playlistUrl = it }, "http://…/liste.m3u",
+                    "Optional: eigene M3U-Liste (http/https) mit rtsp://-SAT>IP-Adressen. Leer lassen = Senderliste der FRITZ!Box.",
+                    emptyText = "FRITZ!Box verwenden"),
                 SettingItem.Toggle("startLast", "Beim Start letzter Sender", { s.startWithLastChannel }, { s.startWithLastChannel = it },
                     "Ein: Home TV startet mit dem zuletzt gesehenen Sender, sonst mit Das Erste HD."),
                 SettingItem.Choice("idle", "Automatisch beenden nach", listOf(0, 1, 2, 4, 6, 8, 12).map { (if (it == 0) "Aus" else "$it h") to it }, { s.idleStopHours }, { s.idleStopHours = it },
                     "Beendet die Wiedergabe nach dieser Zeit ohne jede Tastenbetätigung (gibt den Tuner der FRITZ!Box frei, z. B. wenn der Fernseher ausgeschaltet wurde). Aus = nie."),
-                SettingItem.Action("reload", "Senderliste neu laden", env.reloadChannels, help = "Lädt die Liste erneut von der FRITZ!Box."),
+                SettingItem.Action("reload", "Senderliste neu laden", env.reloadChannels, help = "Lädt die Senderliste erneut (von der FRITZ!Box bzw. der eigenen URL)."),
             )
         },
         SettingsCategory("playback", "Wiedergabe") {

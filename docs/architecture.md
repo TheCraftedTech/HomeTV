@@ -1,4 +1,4 @@
-# Architektur (Version 1.2.0)
+# Architektur (Version 1.3.0)
 
 ## Vorher (1.1.0)
 Eine `MainActivity` (~450 Zeilen) enthielt Wiedergabe, Senderwechsel, Overlay, Tasten, Einstellungen und Logging. Neue Funktionen (Senderliste, EPG, Menü) hätten sie unwartbar gemacht.
@@ -13,7 +13,7 @@ MainActivity (Host: Lebenszyklus, Tastenverteilung, verbindet die Bausteine)
  ├─ satip/         SatIpSession (RTSP/RTP) · RtpResequencer · TsInspector · LocalFeed (TCP/UDP-Loopback)
  ├─ channels/      Channel · Playlist (Senderliste laden/cachen/parsen)
  ├─ epg/           XmltvParser · EpgMatcher · EpgCache · EpgData/Programme · EpgRepository
- ├─ settings/      AppSettings (+KeyValueStore) · SettingsModel/SettingItem (Menümodell ohne Android-Abhängigkeit)
+ ├─ settings/      AppSettings (+KeyValueStore) · SettingsModel/SettingItem (Menümodell) · MenuNavigator (Bedienlogik, ohne Android-Abhängigkeit)
  └─ core/          AppLog (Datei + logcat)        LogDumpReceiver (Log-Abruf per ADB)
 ```
 
@@ -60,13 +60,14 @@ Fallback-Kette TCP → UDP → direkt) wurde aus Version 1.1.0 übernommen, die 
 2. Handshake-Abbruch zwischen den RTSP-Schritten, Start-Gate abschaltbar (Standard an), Zeitstempel der Startphasen.
 3. Einstellungsschlüssel `cacheMs`, `audioDelayMs`, `transport` unverändert → bestehende Werte bleiben erhalten.
 
-## Testabdeckung (87 Unit-Tests + 2 Live-Tests)
+## Testabdeckung (112 Unit-Tests + 2 Live-Tests)
 | Bereich | Tests |
 |---|---|
 | Resequenzer, TS-Inspektor | `ResequencerTest` (8), `TsInspectorTest` (5) |
 | Senderliste | `PlaylistTest` (3), `PlaylistAttributeTest` (1) |
 | Senderwechsel/Zap | `ZapControllerTest` (9, virtuelle Uhr), `HoldTrackerTest` (3), `TuneCoordinatorTest` (6: nur neuester startet, Stop vor Start, nie zwei Sessions, `stopNow`, Generationen) |
 | Einstellungen | `AppSettingsTest` (6), `SettingsModelTest` (10): Defaults, Persistenz, Schlüssel-Kompatibilität 1.1, Wertebereiche, Debug-Sperre |
+| Menü-Bedienung, Senderquelle | `MenuNavigatorTest` (14: markieren ändert nichts, OK klickt an, Bearbeiten-Modus, Zurück-Ebenen), `SourceSettingsTest` (4), `PlaylistSourceTest` (6, lokaler Testserver), `RemainingTextTest` (1) |
 | EPG | `XmltvTimeTest` (5), `XmltvParserTest` (5), `EpgMatcherTest` (9), `EpgDataTest` (5), `EpgRepositoryTest` (10) |
 | Gegen die echte FRITZ!Box (nur mit `HOMETV_LIVE_TEST=1`) | `LiveSatIpTest` (2) |
 **Nicht automatisch getestet:** die Views (Darstellung, Animationen, Fokus-/Tastenverhalten auf dem Gerät) und die LibVLC-Anbindung – dafür fehlt ein Emulator/Gerät in dieser Umgebung.

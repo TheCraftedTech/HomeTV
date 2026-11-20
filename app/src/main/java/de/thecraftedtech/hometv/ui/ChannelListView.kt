@@ -5,31 +5,42 @@ import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AbsListView
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import de.thecraftedtech.hometv.channels.Channel
+import de.thecraftedtech.hometv.epg.Programme
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Senderliste am rechten Bildschirmrand. Die Auswahl wird NICHT ueber den Android-Fokus gefuehrt, sondern von
- * der Activity per [moveSelection] gesteuert (vorhersehbar mit der Fernbedienung). Die Wiedergabe laeuft dabei weiter.
+ * Senderliste als schwebende Karte am rechten Bildschirmrand. Die Auswahl wird NICHT ueber den Android-Fokus gefuehrt,
+ * sondern von der Activity per [moveSelection] gesteuert (vorhersehbar mit der Fernbedienung). Die Wiedergabe laeuft dabei weiter.
+ *
+ * Je Sender: Nummer, Name, – wenn ein Programmfuehrer aktiv ist – laufende Sendung, Fortschrittsbalken und Restzeit.
+ * Oben rechts die Uhrzeit; ein Rollbalken zeigt die Position in der Liste.
  */
 class ChannelListView(context: Context) : FrameLayout(context) {
 
     private val list = ListView(context)
-    private val title = context.label(22f, Ui.TEXT, bold = true)
-    private val hint = context.label(15f, Ui.TEXT_DIM)
+    private val scroll = ScrollIndicator(context)
+    private val title = context.label(18f, Ui.TEXT, bold = true)
+    private val clock = context.label(15f, Ui.ACCENT_LIGHT, bold = true)
+    private val hint = context.label(12f, Ui.TEXT_DIM)
+    private val timeFmt = DateFormat.getTimeInstance(DateFormat.SHORT, Locale.GERMANY)
 
     private var channels: List<Channel> = emptyList()
     private var playingIndex = -1
     var selected = 0
         private set
-    /** Zweite Zeile je Sender (aktuelle Sendung) – null/leer = keine. */
-    var subtitle: (Channel) -> String? = { null }
+    /** Laufende Sendung eines Senders (null = keine Information, z. B. Programmfuehrer aus). */
+    var nowProgramme: (Channel) -> Programme? = { null }
 
-    private val rowH = context.dp(66)
+    private val rowApprox = context.dp(46)
 
     private val adapter = object : BaseAdapter() {
         override fun getCount() = channels.size
@@ -37,35 +48,55 @@ class ChannelListView(context: Context) : FrameLayout(context) {
         override fun getItemId(position: Int) = position.toLong()
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val row = (convertView as? Row) ?: Row(context)
-            row.bind(position, channels[position], position == selected, position == playingIndex, subtitle(channels[position]))
+            row.bind(position, channels[position], position == selected, position == playingIndex, nowProgramme(channels[position]), System.currentTimeMillis())
             return row
+        }
+    }
+
+    /** Uhr und Fortschrittsbalken regelmaessig aktualisieren, solange die Liste offen ist. */
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (!opened) return
+            updateClock(); adapter.notifyDataSetChanged()
+            postDelayed(this, 20_000)
         }
     }
 
     init {
         visibility = GONE
-        val panel = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Ui.BG_PANEL)
-            setPadding(context.dp(8), context.dp(24), context.dp(8), context.dp(16))
-        }
-        val head = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(context.dp(20), 0, context.dp(20), context.dp(12)) }
+        background = context.cardBackground()
+        setPadding(context.dp(8), context.dp(14), context.dp(8), context.dp(10))
+
+        val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val head = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(context.dp(10), 0, context.dp(10), context.dp(8)) }
+        val headRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         title.text = "Sender"
-        hint.text = "▲▼ wählen    OK starten    Zurück schließen"
-        head.addView(title); head.addView(hint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6) })
-        panel.addView(head)
+        headRow.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        headRow.addView(clock)
+        head.addView(headRow)
+        hint.text = "▲▼ wählen    OK starten    ◄ / Zurück schließen"
+        head.addView(hint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(3) })
+        col.addView(head)
+
         list.apply {
             isFocusable = false
             isFocusableInTouchMode = false
             divider = ColorDrawable(0)
-            dividerHeight = 0
+            dividerHeight = context.dp(1)
             selector = ColorDrawable(0)
             isVerticalScrollBarEnabled = false
             this.adapter = this@ChannelListView.adapter
             overScrollMode = OVER_SCROLL_NEVER
+            setOnScrollListener(object : AbsListView.OnScrollListener {
+                override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) {}
+                override fun onScroll(view: AbsListView?, first: Int, visible: Int, total: Int) = scroll.update(first, visible, total)
+            })
         }
-        panel.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        addView(panel, LayoutParams(context.dp(400), LayoutParams.MATCH_PARENT, Gravity.END))
+        val body = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        body.addView(list, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        body.addView(scroll, LinearLayout.LayoutParams(context.dp(3), LinearLayout.LayoutParams.MATCH_PARENT).apply { leftMargin = context.dp(4); rightMargin = context.dp(2) })
+        col.addView(body, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     fun setChannels(list: List<Channel>) { channels = list; adapter.notifyDataSetChanged() }
@@ -76,15 +107,19 @@ class ChannelListView(context: Context) : FrameLayout(context) {
         opened = true
         playingIndex = currentIndex
         selected = currentIndex.coerceIn(0, (channels.size - 1).coerceAtLeast(0))
+        updateClock()
         adapter.notifyDataSetChanged()
-        showAnimated(fromX = context.dpf(80f))
+        showAnimated(fromX = context.dpf(60f))
         post { centerSelection() }
+        removeCallbacks(ticker); postDelayed(ticker, 20_000)
+        // nach der Animation nochmals komplett neu zeichnen (verhindert halb aktualisierte Raender)
+        postDelayed({ if (opened) redrawFully() }, Ui.ANIM_MS + 40)
     }
 
-    fun close() { opened = false; hideAnimated(toX = context.dpf(80f)) }
+    fun close() { opened = false; removeCallbacks(ticker); hideAnimated(toX = context.dpf(60f)) }
 
     /** Sofort und ohne Animation schliessen (z. B. in onStop). */
-    fun forceClose() { opened = false; animate().cancel(); visibility = GONE; alpha = 1f; translationX = 0f }
+    fun forceClose() { opened = false; removeCallbacks(ticker); animate().cancel(); visibility = GONE; alpha = 1f; translationX = 0f }
 
     val isOpen: Boolean get() = opened
 
@@ -101,42 +136,59 @@ class ChannelListView(context: Context) : FrameLayout(context) {
     fun setPlaying(index: Int) { playingIndex = index; adapter.notifyDataSetChanged() }
     fun refresh() = adapter.notifyDataSetChanged()
 
+    private fun updateClock() { clock.text = timeFmt.format(Date()) }
+
     private fun centerSelection() {
-        val offset = (list.height / 2 - rowH / 2).coerceAtLeast(0)
+        val offset = (list.height / 2 - rowApprox / 2).coerceAtLeast(0)
         list.setSelectionFromTop(selected, offset)
+        list.post { scroll.update(list.firstVisiblePosition, list.childCount, adapter.count) }
     }
 
     private inner class Row(context: Context) : LinearLayout(context) {
-        private val num = context.label(22f, Ui.TEXT_DIM, bold = true)
-        private val nm = context.label(22f, Ui.TEXT, bold = true)
-        private val sub = context.label(16f, Ui.TEXT_DIM)
+        private val num = context.label(14f, Ui.TEXT_DIM, bold = true)
+        private val nm = context.label(15f, Ui.TEXT, bold = true)
+        private val remain = context.label(12f, Ui.TEXT_DIM)
+        private val sub = context.label(12f, Ui.TEXT_DIM)
+        private val bar = ProgressStrip(context)
         private val marker = View(context)
 
         init {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = AbsListViewLayoutParams(rowH)
-            setPadding(context.dp(12), 0, context.dp(16), 0)
-            addView(marker, LayoutParams(context.dp(5), context.dp(36)).apply { rightMargin = context.dp(10) })
+            layoutParams = AbsListView.LayoutParams(AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT)
+            setPadding(context.dp(8), context.dp(5), context.dp(10), context.dp(5))
+            addView(marker, LayoutParams(context.dp(4), context.dp(24)).apply { rightMargin = context.dp(8) })
             num.gravity = Gravity.END
-            addView(num, LayoutParams(context.dp(52), LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(14) })
+            addView(num, LayoutParams(context.dp(30), LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(10) })
+
             val col = LinearLayout(context).apply { orientation = VERTICAL }
-            col.addView(nm); col.addView(sub)
+            val line1 = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            line1.addView(nm, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            line1.addView(remain, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(8) })
+            col.addView(line1)
+            col.addView(sub, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(1) })
+            col.addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, context.dp(3)).apply { topMargin = context.dp(3) })
             addView(col, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         }
 
-        fun bind(pos: Int, ch: Channel, isSelected: Boolean, isPlaying: Boolean, subText: String?) {
+        fun bind(pos: Int, ch: Channel, isSelected: Boolean, isPlaying: Boolean, p: Programme?, nowMs: Long) {
             num.text = (pos + 1).toString()
             nm.text = ch.name
-            sub.text = subText.orEmpty()
-            sub.visibility = if (subText.isNullOrEmpty()) GONE else VISIBLE
-            background = if (isSelected) roundRect(Ui.BG_ROW_SELECTED, context.dpf(10f)) else null
+            background = if (isSelected) roundRect(Ui.BG_ROW_SELECTED, context.dpf(8f)) else null
             nm.setTextColor(Ui.TEXT)
             num.setTextColor(if (isSelected) Ui.TEXT else Ui.TEXT_DIM)
-            sub.setTextColor(if (isSelected) 0xFFDCE8FF.toInt() else Ui.TEXT_DIM)
-            marker.background = if (isPlaying) roundRect(if (isSelected) Ui.TEXT else Ui.ACCENT, context.dpf(3f)) else null
+            val dim = if (isSelected) 0xFFDCE8FF.toInt() else Ui.TEXT_DIM
+            sub.setTextColor(dim); remain.setTextColor(dim)
+            marker.background = if (isPlaying) roundRect(if (isSelected) Ui.TEXT else Ui.ACCENT, context.dpf(2f)) else null
+
+            if (p == null) {
+                sub.visibility = GONE; bar.visibility = GONE; remain.visibility = GONE
+            } else {
+                sub.visibility = VISIBLE; bar.visibility = VISIBLE; remain.visibility = VISIBLE
+                sub.text = p.title
+                bar.fraction = (nowMs - p.start).toFloat() / p.durationMs.coerceAtLeast(1)
+                remain.text = remainingText(p.end - nowMs)
+            }
         }
     }
-
-    private fun AbsListViewLayoutParams(h: Int) = android.widget.AbsListView.LayoutParams(android.widget.AbsListView.LayoutParams.MATCH_PARENT, h)
 }

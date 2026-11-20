@@ -20,11 +20,12 @@ data class Channel(
 )
 
 /**
- * Senderliste. Quelle ist ausschliesslich die M3U der FRITZ!Box (AVM-Weg /dvb/m3u/tvhd.m3u + tvsd.m3u),
- * HD zuerst, dann SD – genau wie tests/data/tv.m3u. Stream-Adressen werden nie zusammengesetzt.
+ * Senderliste. Standardquelle ist die M3U der FRITZ!Box (AVM-Weg /dvb/m3u/tvhd.m3u + tvsd.m3u), HD zuerst, dann SD –
+ * genau wie tests/data/tv.m3u. Optional kann der Nutzer eine eigene M3U-Adresse (http/https) angeben; ihre Eintraege muessen
+ * rtsp://-SAT>IP-Adressen sein. Stream-Adressen werden nie zusammengesetzt.
  *
- * Reihenfolge der Quellen: 1. live von der Box, 2. Zwischenspeicher der letzten erfolgreichen Abfrage,
- * 3. beim Build mitgelieferte Kopie von tests/data/tv.m3u (falls beim Build vorhanden).
+ * Reihenfolge: 1. live von der Quelle, 2. Zwischenspeicher der letzten erfolgreichen Abfrage DIESER Quelle,
+ * 3. (nur Standard-FRITZ!Box) beim Build mitgelieferte Kopie von tests/data/tv.m3u (falls beim Build vorhanden).
  */
 object Playlist {
 
@@ -32,29 +33,43 @@ object Playlist {
 
     data class Loaded(val channels: List<Channel>, val source: String)
 
-    private const val CACHE_FILE = "tv.m3u"
     private const val ASSET_FILE = "tv.m3u"
     private val DEFAULT_NAMES = listOf("Das Erste HD", "Das Erste", "ARD HD")
     private val ATTR = Regex("([A-Za-z0-9_-]+)=\"([^\"]*)\"")
 
-    /** Blockierend (Netzwerk) – nicht im UI-Thread aufrufen. */
-    fun load(context: Context, host: String): Loaded {
+    /** Zwischenspeicher je Quelle (FRITZ!Box-Adresse bzw. eigene URL), damit eine andere Quelle nie die Liste der vorigen anzeigt. */
+    internal fun cacheName(host: String, customUrl: String): String =
+        if (customUrl.isNotBlank()) "tv-url-${customUrl.trim().hashCode().toUInt().toString(16)}.m3u"
+        else "tv-box-${host.trim().hashCode().toUInt().toString(16)}.m3u"
+
+    /**
+     * Blockierend (Netzwerk) – nicht im UI-Thread aufrufen.
+     * @param customUrl  eigene M3U-Adresse; leer = Senderliste der FRITZ!Box unter [host]
+     * @param assetFallback  die beim Build mitgelieferte Kopie der FRITZ!Box-Liste nur fuer die Standard-Box zulassen
+     */
+    fun load(context: Context, host: String, customUrl: String = "", assetFallback: Boolean = true): Loaded {
+        val custom = customUrl.isNotBlank()
+        val cache = File(context.filesDir, cacheName(host, customUrl))
         var liveError: Exception? = null
         try {
-            val hd = fetch(host, "tvhd")
-            val sd = runCatching { fetch(host, "tvsd") }.getOrDefault(emptyList())
-            val all = hd + sd
-            if (all.isEmpty()) throw PlaylistException("Die Senderliste der FRITZ!Box ist leer.")
-            runCatching { File(context.filesDir, CACHE_FILE).writeText(toM3u(all)) }
-            return Loaded(all, "FRITZ!Box")
+            val all = if (custom) {
+                fetchUrl(customUrl, "Senderliste").also {
+                    if (it.isEmpty()) throw PlaylistException("Unter dieser Adresse wurden keine Sender mit rtsp://-Adresse (SAT>IP) gefunden.")
+                }
+            } else {
+                val hd = fetch(host, "tvhd")
+                val sd = runCatching { fetch(host, "tvsd") }.getOrDefault(emptyList())
+                (hd + sd).also { if (it.isEmpty()) throw PlaylistException("Die Senderliste der FRITZ!Box ist leer.") }
+            }
+            runCatching { cache.writeText(toM3u(all)) }
+            return Loaded(all, if (custom) "eigene URL" else "FRITZ!Box")
         } catch (e: Exception) {
             liveError = e
         }
         runCatching {
-            val f = File(context.filesDir, CACHE_FILE)
-            if (f.exists()) parse(f.readText()).takeIf { it.isNotEmpty() }?.let { return Loaded(it, "Zwischenspeicher") }
+            if (cache.exists()) parse(cache.readText()).takeIf { it.isNotEmpty() }?.let { return Loaded(it, "Zwischenspeicher") }
         }
-        runCatching {
+        if (assetFallback && !custom) runCatching {
             val text = context.assets.open(ASSET_FILE).bufferedReader(Charsets.UTF_8).use { it.readText() }
             parse(text).takeIf { it.isNotEmpty() }?.let { return Loaded(it, "mitgelieferte Kopie") }
         }
@@ -72,21 +87,30 @@ object Playlist {
     fun indexOfName(channels: List<Channel>, name: String): Int =
         channels.indexOfFirst { it.name.equals(name, ignoreCase = true) }
 
-    internal fun fetch(host: String, list: String): List<Channel> {
-        val conn = URL("http://$host/dvb/m3u/$list.m3u").openConnection() as HttpURLConnection
+    internal fun fetch(host: String, list: String): List<Channel> =
+        fetchUrl("http://$host/dvb/m3u/$list.m3u", "Senderliste ($list)", "FRITZ!Box $host")
+
+    /** Laedt und parst eine M3U per HTTP(S). Eine Adresse ohne Schema wird als http:// behandelt. */
+    internal fun fetchUrl(rawUrl: String, what: String, where: String? = null): List<Channel> {
+        val text = rawUrl.trim()
+        val full = if ("://" in text) text else "http://$text"
+        val url = try { URL(full) } catch (e: java.net.MalformedURLException) { throw PlaylistException("Ungültige Adresse: $text", e) }
+        if (url.protocol != "http" && url.protocol != "https") throw PlaylistException("Nur http:// und https:// Adressen werden unterstützt: $text")
+        val label = where ?: url.host
+        val conn = url.openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 5000
             conn.readTimeout = 8000
             conn.requestMethod = "GET"
             val code = conn.responseCode
-            if (code != 200) throw PlaylistException("Senderliste ($list) lieferte HTTP $code.")
+            if (code != 200) throw PlaylistException("$what lieferte HTTP $code.")
             return parse(conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
         } catch (e: PlaylistException) {
             throw e
         } catch (e: java.net.SocketTimeoutException) {
-            throw PlaylistException("Zeitüberschreitung beim Laden der Senderliste von $host.", e)
+            throw PlaylistException("Zeitüberschreitung beim Laden von $label.", e)
         } catch (e: java.io.IOException) {
-            throw PlaylistException("FRITZ!Box $host nicht erreichbar (${e.javaClass.simpleName}: ${e.message}).", e)
+            throw PlaylistException("$label nicht erreichbar (${e.javaClass.simpleName}: ${e.message}).", e)
         } finally {
             conn.disconnect()
         }

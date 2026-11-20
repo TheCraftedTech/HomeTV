@@ -136,7 +136,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
         AppLog.init(this)
-        settings = AppSettings(SharedPrefsStore(this))
+        settings = AppSettings(SharedPrefsStore(this), BuildConfig.FRITZBOX_HOST)
         handleIntent(intent)
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
@@ -162,10 +162,10 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         val match = FrameLayout.LayoutParams.MATCH_PARENT
         infoBar = InfoBarView(this)
         channelList = ChannelListView(this)
-        channelList.subtitle = { ch -> if (settings.showEpgInChannelList && settings.epgActive) epgRepo.now(ch)?.title else null }
+        channelList.nowProgramme = { ch -> if (settings.showEpgInChannelList && settings.epgActive) epgRepo.now(ch) else null }
 
         val env = SettingsEnv(
-            versionText = "${BuildConfig.VERSION_NAME} (Code ${BuildConfig.VERSION_CODE})",
+            versionText = BuildConfig.VERSION_NAME,
             channelInfo = { if (channels.isEmpty()) "keine geladen" else "${channels.size} (Quelle: $channelSource)" },
             reloadChannels = { reloadChannels() },
             epgStatus = { epgRepo.statusText() },
@@ -185,8 +185,9 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         message = MessageView(this)
 
         root.addView(infoBar, FrameLayout.LayoutParams(match, match))
-        root.addView(channelList, FrameLayout.LayoutParams(match, match))
-        root.addView(menu, FrameLayout.LayoutParams(match, match))
+        // schwebende Karten mit Abstand zum Rand (Overscan-sicher); Breite bewusst schmal, damit viel Bild sichtbar bleibt
+        root.addView(channelList, FrameLayout.LayoutParams(dp(340), match, Gravity.END).apply { setMargins(0, dp(20), dp(20), dp(20)) })
+        root.addView(menu, FrameLayout.LayoutParams(dp(520), match, Gravity.START).apply { setMargins(dp(20), dp(20), 0, dp(20)) })
         root.addView(debugOverlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { setMargins(dp(24), dp(24), 0, 0) })
         root.addView(volumeView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { setMargins(0, dp(28), dp(36), 0) })
         root.addView(message, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { setMargins(0, 0, 0, dp(110)) })
@@ -262,9 +263,9 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
             main.postDelayed({ epgRepo.refreshIfStale() }, 25_000)
             return
         }
-        setLoading("Lade Senderliste von ${BuildConfig.FRITZBOX_HOST} …")
+        setLoading("Lade Senderliste von ${sourceLabel()} …")
         playWorker.execute {
-            val r = runCatching { Playlist.load(this, BuildConfig.FRITZBOX_HOST) }
+            val r = runCatching { loadPlaylist() }
             main.post {
                 if (!playbackActive) return@post
                 r.onSuccess { loaded ->
@@ -276,7 +277,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
                     zap.setCurrent(start)
                     playback.tune(start)
                     scheduleEpgWork()
-                }.onFailure { e -> showErrorScreen("Keine Verbindung zur FRITZ!Box", e.message ?: e.toString()) }
+                }.onFailure { e -> showErrorScreen(if (settings.customPlaylist) "Senderliste nicht ladbar" else "Keine Verbindung zur FRITZ!Box", e.message ?: e.toString()) }
             }
         }
     }
@@ -296,16 +297,34 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         channelList.setChannels(list)
     }
 
-    private fun reloadChannels() {
+    private fun sourceLabel() = if (settings.customPlaylist) settings.playlistUrl else settings.fritzboxHost
+
+    /** Blockierend (Netzwerk) – nur auf dem Worker-Thread aufrufen. */
+    private fun loadPlaylist(): Playlist.Loaded {
+        val custom = settings.playlistUrl
+        val host = settings.fritzboxHost
+        return Playlist.load(this, host, custom, assetFallback = custom.isBlank() && host == settings.defaultHost)
+    }
+
+    /** @param sourceChanged  Adresse/URL wurde geaendert: nicht mehr vorhandener Sender -> Standardsender laden. */
+    private fun reloadChannels(sourceChanged: Boolean = false) {
         showMessage("Lade Senderliste …")
         playWorker.execute {
-            val r = runCatching { Playlist.load(this, BuildConfig.FRITZBOX_HOST) }
+            val r = runCatching { loadPlaylist() }
             main.post {
                 r.onSuccess { l ->
                     val cur = channels.getOrNull(zap.current)?.name
                     applyChannels(l.channels, l.source)
                     val keep = cur?.let { Playlist.indexOfName(channels, it) }?.takeIf { it >= 0 }
                     if (keep != null) zap.setCurrent(keep)
+                    else if (sourceChanged && playbackActive) {
+                        // neue Quelle ohne den bisherigen Sender: mit dem Standardsender der neuen Liste weitermachen
+                        val start = Playlist.defaultIndex(channels)
+                        zap.setCurrent(start)
+                        channelList.setPlaying(start)
+                        playback.tune(start)
+                        showInfo(start, epg = settings.showEpgOnZap, autoHide = true)
+                    }
                     showMessage("${l.channels.size} Sender geladen (${l.source})")
                 }.onFailure { showMessage("Senderliste nicht ladbar: ${it.message}") }
             }
@@ -484,6 +503,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         when (item.id) {
             "cache", "transport", "gate" -> playbackDirty = true
             "idle" -> armIdleTimer()
+            "host", "playlistUrl" -> reloadChannels(sourceChanged = true)
             "audio" -> playback.applyAudioDelay()
             "debug" -> { if (!settings.debugMode) closeDebugOverlay(); showMessage(if (settings.debugMode) "Debug-Modus an – Menü-Taste lang drücken. VLC-Log ab nächstem Wiedergabestart." else "Debug-Modus aus") }
             "epgUrl" -> { if (settings.epgActive) { epgRepo.refresh(force = true); showMessage("Programmführer wird geladen …") } }
@@ -540,7 +560,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         }
         if (code == KeyEvent.KEYCODE_MENU) return onMenuDown(e)
         return when {
-            menu.isOpen -> menu.handleKey(code)
+            menu.isOpen -> menu.handleKey(code, e.repeatCount)
             channelList.isOpen -> handleListKey(e)
             else -> handlePlayerKey(e)
         }

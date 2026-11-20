@@ -279,7 +279,7 @@ class AppSettingsTest {
 class SettingsModelTest {
     private val log = ArrayList<String>()
     private fun model(s: AppSettings) = SettingsModel(s, SettingsEnv(
-        versionText = "1.2.0 (Code 3)", channelInfo = { "97" }, reloadChannels = { log += "reload" },
+        versionText = "1.3.0", channelInfo = { "97" }, reloadChannels = { log += "reload" },
         epgStatus = { "ok" }, epgLastUpdate = { "nie" }, epgMatchInfo = { "0" }, epgCacheInfo = { "leer" },
         refreshEpg = { log += "refresh" }, clearEpgCache = { log += "clear" }, showDebugOverlay = { log += "debug" }, logPath = "/x/hometv.log",
     ))
@@ -368,7 +368,7 @@ class SettingsModelTest {
 
     @Test fun infoItemsShowLiveValues() {
         val m = model(AppSettings(MemoryStore()))
-        assertEquals("1.2.0 (Code 3)", item(m, "version").display())
+        assertEquals("1.3.0", item(m, "version").display())
         assertEquals("ok", item(m, "epgStatus").display())
         assertEquals("/x/hometv.log", item(m, "debugLog").display())
     }

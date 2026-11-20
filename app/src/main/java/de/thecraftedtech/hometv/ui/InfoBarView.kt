@@ -15,20 +15,6 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Schmaler Fortschrittsbalken (Anteil der laufenden Sendung). */
-private class ProgressStrip(context: Context) : View(context) {
-    var fraction = 0f
-        set(v) { field = v.coerceIn(0f, 1f); invalidate() }
-    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF }
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Ui.ACCENT }
-    private val r = RectF()
-    override fun onDraw(c: Canvas) {
-        val h = height.toFloat()
-        r.set(0f, 0f, width.toFloat(), h); c.drawRoundRect(r, h / 2, h / 2, track)
-        if (fraction > 0f) { r.set(0f, 0f, width * fraction, h); c.drawRoundRect(r, h / 2, h / 2, fill) }
-    }
-}
-
 /**
  * Info-Leiste am unteren Rand: Sendernummer + Name, laufende Sendung mit Zeit/Fortschritt/Beschreibung und die naechste Sendung.
  * Wird bei OK, beim Senderwechsel (sofort, noch vor dem Bild) und bei Statusmeldungen eingeblendet.
