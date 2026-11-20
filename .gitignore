@@ -1,0 +1,50 @@
+# Lokale Werkzeuge / Umgebungen
+.venv/
+.gradle-home/
+.android-sdk/
+.gradle/
+tools/platform-tools/
+tools/jdk/
+
+# Build-Zwischendateien
+build/*
+!build/.gitkeep
+app/build/
+**/build/intermediates/
+*.class
+*.dex
+local.properties
+.idea/
+*.iml
+captures/
+
+# Release-Signierung / Zugangsdaten (niemals einchecken)
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+.env
+*.secret
+credentials*.json
+
+# Persönliche Testkonfiguration (enthält LAN-Adressen / Sender des Nutzers)
+tests/data/
+scripts/firetv.local.cfg
+*.local.*
+
+# Große Binärdateien / Mitschnitte
+*.ts
+*.mp4
+*.mkv
+*.apk
+*.aab
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
