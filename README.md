@@ -1,9 +1,9 @@
 # Home TV
 
 Native Android-App (Kotlin, LibVLC) für **Amazon Fire TV**, die Live-TV direkt von einer **FRITZ!Box 6660 Cable** (DVB-C, SAT>IP) wiedergibt – ohne zusätzlichen Streamingserver und ohne Transkodierung.
-Entwickelt von Samuel · Paket `de.thecraftedtech.hometv` · **Version 1.2.0 (Code 3)**.
+Entwickelt von Samuel · Paket `de.thecraftedtech.hometv` · **Version 1.2.1 (Code 4)**.
 
-> ⚠️ **Teststatus:** Version 1.1.0 lief auf dem Fire TV (Bild, Ton, Synchronisation, ≈ 5 s bis zum Bild, gute Qualität). **Version 1.2.0 ist gebaut und ihre Logik unit-getestet (87 Tests), aber noch nicht auf dem Fire TV installiert.**
+> ⚠️ **Teststatus:** Version 1.1.0 lief auf dem Fire TV (Bild, Ton, Synchronisation, ≈ 5 s bis zum Bild, gute Qualität). **Version 1.2.1 ist gebaut und ihre Logik unit-getestet (87 Tests), aber noch nicht auf dem Fire TV installiert.**
 > Die neue Oberfläche habe ich nicht auf einem Fernseher gesehen. Details unter „Teststatus".
 
 ## Funktionen
@@ -39,7 +39,7 @@ Ein kleiner eigener SAT>IP-Client reicht den TS-Strom lokal an **LibVLC** weiter
 
 ## Bauen und Installieren
 ```
-scripts\build-release.bat        →  build\HomeTV.apk   (signiert mit dem vorhandenen Release-Schlüssel, Version 1.2.0)
+scripts\build-release.bat        →  build\HomeTV.apk   (signiert mit dem vorhandenen Release-Schlüssel, Version 1.2.1)
 scripts\test-adb.bat             (Verbindung prüfen, installiert nichts)
 scripts\install-firetv.bat       (adb install -r – behält die Einstellungen; IP aus firetv-ip.txt)
 scripts\pull-log.bat             (Log, TIMELINE/STATS und UDP-Zähler vom Fire TV holen)
@@ -65,8 +65,8 @@ Genaue Schritte, Signierschlüssel, Checkliste für den Fernseher und Entfernen 
 | Version 1.1.0 auf dem Fire TV: Bild, Ton, Synchronisation, Startzeit ≈ 5 s, Senderwechsel grundsätzlich | ✅ (vom Nutzer bestätigt) |
 | Unit-Tests: Senderwechsel/Abbruch, Zap-Entprellung, Halte-Beschleunigung, Einstellungen, Menümodell, XMLTV-Parser, Senderzuordnung, EPG-Cache und -Repository (lokaler HTTP-Server), Resequenzer, TS-Inspektor, Playlist | ✅ **87 Tests** |
 | SAT>IP-Client gegen die echte FRITZ!Box (Laptop) | ✅ (1.1; 1.2 übernimmt den Client, Live-Test nur mit `HOMETV_LIVE_TEST=1`) |
-| Version 1.2.0: signierte Release-APK gebaut | ✅ `build\HomeTV.apk` |
-| Version 1.2.0 auf dem Fire TV installiert | ⬜ offen (nur durch dich) |
+| Version 1.2.1: signierte Release-APK gebaut | ✅ `build\HomeTV.apk` |
+| Version 1.2.1 auf dem Fire TV installiert | ⬜ offen (nur durch dich) |
 | Neue Oberfläche (Info-Leiste, Senderliste, Menü, Animationen, Tastenverhalten, Hold-Zapping), Programmführer mit echter XMLTV-Quelle, Inaktivitäts-Timer | ⬜ **ungetestet auf dem Fire TV** |
 | Power-/Lautstärke-/Stumm-Tasten in der App | ⬜ ungeprüft; laut Amazon nicht an Apps (siehe `firetv-limits.md`) |
 | Icon-Aktualisierung nach dem Update | ⬜ offen (Ursache liegt laut Befund im Launcher-/Appstore-Cache, nicht in der APK) |

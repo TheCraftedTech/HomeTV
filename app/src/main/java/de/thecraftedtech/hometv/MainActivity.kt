@@ -377,6 +377,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
 
     private fun showInfo(index: Int, epg: Boolean, autoHide: Boolean, preview: Boolean = false) {
         if (channels.isEmpty()) return
+        if (menu.isOpen || channelList.isOpen) return   // Menue/Senderliste haben Vorrang, die Leiste legt sich nicht darueber
         shownInfoIndex = index.coerceIn(0, channels.size - 1)
         shownInfoEpg = epg
         infoAutoHide = autoHide

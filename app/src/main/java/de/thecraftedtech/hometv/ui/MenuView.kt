@@ -109,6 +109,7 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
     val isOpen: Boolean get() = opened
 
     fun open() {
+        opened = true
         inItems = false
         loadItems()
         showAnimated(fromX = -context.dpf(80f))
@@ -130,7 +131,7 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
     fun refresh() {
         catAdapter.notifyDataSetChanged()
         itemAdapter.notifyDataSetChanged()
-        help.text = if (inItems) items.getOrNull(itemIndex)?.help.orEmpty() else "▲▼ Bereich wählen    ► / OK öffnen    Zurück schließen"
+        help.text = if (inItems) items.getOrNull(itemIndex)?.help.orEmpty() else "▲▼ Bereich wählen    ► / OK öffnen    ◄ / Zurück schließen"
         if (inItems) itemList.setSelectionFromTop(itemIndex, (itemList.height / 2 - rowH / 2).coerceAtLeast(0))
     }
 
@@ -149,7 +150,7 @@ class MenuView(context: Context, private val categories: List<SettingsCategory>)
                 if (inItems) {
                     val it = items.getOrNull(itemIndex)
                     if (it != null && it.adjustable) changed(it, it.adjust(-1)) else leaveItems()
-                }
+                } else callbacks?.onClose()
             }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 if (!inItems) enterItems() else activate()

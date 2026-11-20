@@ -35,15 +35,15 @@ private class ProgressStrip(context: Context) : View(context) {
  */
 class InfoBarView(context: Context) : FrameLayout(context) {
 
-    private val number = context.label(44f, Ui.ACCENT_LIGHT, bold = true)
-    private val name = context.label(28f, Ui.TEXT, bold = true)
-    private val status = context.label(18f, Ui.TEXT_DIM)
-    private val nowTitle = context.label(24f, Ui.TEXT, bold = true)
-    private val nowTime = context.label(20f, Ui.TEXT_DIM)
+    private val number = context.label(28f, Ui.ACCENT_LIGHT, bold = true)
+    private val name = context.label(20f, Ui.TEXT, bold = true)
+    private val status = context.label(14f, Ui.TEXT_DIM)
+    private val nowTitle = context.label(17f, Ui.TEXT, bold = true)
+    private val nowTime = context.label(14f, Ui.TEXT_DIM)
     private val progress = ProgressStrip(context)
-    private val desc = context.label(18f, Ui.TEXT_DIM, lines = 2)
-    private val next = context.label(19f, Ui.TEXT_DIM)
-    private val hint = context.label(18f, Ui.TEXT_DIM)
+    private val desc = context.label(14f, Ui.TEXT_DIM, lines = 1)
+    private val next = context.label(14f, Ui.TEXT_DIM)
+    private val hint = context.label(14f, Ui.TEXT_DIM)
     private val timeFmt = DateFormat.getTimeInstance(DateFormat.SHORT, Locale.GERMANY)
 
     private val nowBlock = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -52,11 +52,11 @@ class InfoBarView(context: Context) : FrameLayout(context) {
         visibility = GONE
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = roundRect(Ui.BG_PANEL_SOFT, context.dpf(14f))
-            setPadding(context.dp(28), context.dp(20), context.dp(28), context.dp(20))
+            background = roundRect(Ui.BG_PANEL_SOFT, context.dpf(10f))
+            setPadding(context.dp(20), context.dp(12), context.dp(20), context.dp(12))
             gravity = Gravity.CENTER_VERTICAL
         }
-        panel.addView(number, LinearLayout.LayoutParams(context.dp(96), LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(12) })
+        panel.addView(number, LinearLayout.LayoutParams(context.dp(64), LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = context.dp(10) })
 
         val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val head = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -67,17 +67,18 @@ class InfoBarView(context: Context) : FrameLayout(context) {
         val titleRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         titleRow.addView(nowTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         titleRow.addView(nowTime, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = context.dp(16) })
-        nowBlock.addView(titleRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(10) })
-        nowBlock.addView(progress, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, context.dp(5)).apply { topMargin = context.dp(8) })
-        nowBlock.addView(desc, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
-        nowBlock.addView(next, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
+        nowBlock.addView(titleRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6) })
+        nowBlock.addView(progress, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, context.dp(3)).apply { topMargin = context.dp(5) })
+        nowBlock.addView(desc, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(5) })
+        nowBlock.addView(next, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(3) })
         col.addView(nowBlock)
-        col.addView(hint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
+        col.addView(hint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(4) })
         panel.addView(col, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
+        // Sicherheitsabstand zum Bildschirmrand (Overscan mancher Fernseher): unten/seitlich grosszuegig, Leiste selbst kompakt
         addView(panel, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.BOTTOM
-            setMargins(context.dp(48), 0, context.dp(48), context.dp(36))
+            setMargins(context.dp(64), 0, context.dp(64), context.dp(44))
         })
     }
 
