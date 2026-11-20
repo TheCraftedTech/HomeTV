@@ -1,11 +1,23 @@
-package de.thecraftedtech.hometv
+package de.thecraftedtech.hometv.channels
 
 import android.content.Context
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-data class Channel(val name: String, val url: String)
+/**
+ * Ein Sender der FRITZ!Box-Liste. [tvgId]/[tvgName]/[logo]/[group] stammen aus optionalen M3U-Attributen
+ * (`tvg-id`, `tvg-name`, `tvg-logo`, `group-title`); die M3U der FRITZ!Box enthaelt sie nicht (nur Name + URL).
+ * [number] ist die 1-basierte Position in der Liste (wird von der App vergeben, nicht gespeichert).
+ */
+data class Channel(
+    val name: String,
+    val url: String,
+    val tvgId: String? = null,
+    val tvgName: String? = null,
+    val logo: String? = null,
+    val group: String? = null,
+)
 
 /**
  * Senderliste. Quelle ist ausschliesslich die M3U der FRITZ!Box (AVM-Weg /dvb/m3u/tvhd.m3u + tvsd.m3u),
@@ -23,7 +35,9 @@ object Playlist {
     private const val CACHE_FILE = "tv.m3u"
     private const val ASSET_FILE = "tv.m3u"
     private val DEFAULT_NAMES = listOf("Das Erste HD", "Das Erste", "ARD HD")
+    private val ATTR = Regex("([A-Za-z0-9_-]+)=\"([^\"]*)\"")
 
+    /** Blockierend (Netzwerk) – nicht im UI-Thread aufrufen. */
     fun load(context: Context, host: String): Loaded {
         var liveError: Exception? = null
         try {
@@ -80,25 +94,48 @@ object Playlist {
 
     internal fun parse(text: String): List<Channel> {
         val result = ArrayList<Channel>()
-        var pendingName: String? = null
+        var pending: Channel? = null
         for (raw in text.lineSequence()) {
             val line = raw.trim().trimStart('﻿')
             when {
                 line.isEmpty() -> Unit
-                line.startsWith("#EXTINF") -> pendingName = line.substringAfter(',', "").trim()
+                line.startsWith("#EXTINF") -> pending = parseExtInf(line)
                 line.startsWith("#") -> Unit
                 else -> {
-                    val name = pendingName
-                    if (name != null && line.startsWith("rtsp://")) result += Channel(name, line)
-                    pendingName = null
+                    val p = pending
+                    if (p != null && line.startsWith("rtsp://")) result += p.copy(url = line)
+                    pending = null
                 }
             }
         }
         return result
     }
 
+    /** `#EXTINF:0 tvg-id="x" tvg-name="y" tvg-logo="z" group-title="g",Anzeigename` */
+    private fun parseExtInf(line: String): Channel {
+        val comma = line.lastIndexOf(',')
+        val name = if (comma >= 0) line.substring(comma + 1).trim() else ""
+        val head = if (comma >= 0) line.substring(0, comma) else line
+        val attrs = ATTR.findAll(head).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
+        return Channel(
+            name = name.ifEmpty { attrs["tvg-name"].orEmpty() },
+            url = "",
+            tvgId = attrs["tvg-id"]?.ifBlank { null },
+            tvgName = attrs["tvg-name"]?.ifBlank { null },
+            logo = attrs["tvg-logo"]?.ifBlank { null },
+            group = attrs["group-title"]?.ifBlank { null },
+        )
+    }
+
     internal fun toM3u(channels: List<Channel>): String = buildString {
         append("#EXTM3U\n")
-        for (c in channels) append("#EXTINF:0,").append(c.name).append('\n').append(c.url).append('\n')
+        for (c in channels) {
+            append("#EXTINF:0")
+            c.tvgId?.let { append(" tvg-id=\"").append(it).append('"') }
+            c.tvgName?.let { append(" tvg-name=\"").append(it).append('"') }
+            c.logo?.let { append(" tvg-logo=\"").append(it).append('"') }
+            c.group?.let { append(" group-title=\"").append(it).append('"') }
+            append(',').append(c.name).append('\n').append(c.url).append('\n')
+        }
     }
 }

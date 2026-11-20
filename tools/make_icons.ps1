@@ -1,4 +1,4 @@
-﻿# Erzeugt alle App-Icons/Banner aus dem Home-TV-Branding (Navy #0E1320, Blau #2E7BFF, Schriftzug "Home TV").
+# Erzeugt alle App-Icons/Banner aus dem Home-TV-Branding (Navy #0E1320, Blau #2E7BFF, Schriftzug "Home TV").
 # Nur ffmpeg (bereits vorhanden). Aufruf: powershell -File tools\make_icons.ps1
 # Vorgaben: developer.android.com/design/ui/tv/guides/system/tv-app-icon-guidelines
 #   Banner 16:9 in mipmap-*: mdpi 160x90 .. xxxhdpi 640x360, Text im Bild, kein Rahmen, Logo in der Safe-Zone
@@ -21,7 +21,7 @@ Run @('-f','lavfi','-i',"color=c=${navy}:s=1280x720",'-vf',$vf,'-frames:v','1',$
 $banner = @{ 'mdpi'=@(160,90); 'hdpi'=@(240,135); 'xhdpi'=@(320,180); 'xxhdpi'=@(480,270); 'xxxhdpi'=@(640,360) }
 foreach ($d in $banner.Keys) {
     $dir = Join-Path $res "mipmap-$d"; New-Item -ItemType Directory -Force $dir | Out-Null
-    Run @('-i',$bannerBase,'-vf',"scale=$($banner[$d][0]):$($banner[$d][1]):flags=lanczos",'-frames:v','1',(Join-Path $dir 'banner.png'))
+    Run @('-i',$bannerBase,'-vf',"scale=$($banner[$d][0]):$($banner[$d][1]):flags=lanczos",'-frames:v','1',(Join-Path $dir 'hometv_banner.png'))
 }
 
 # ---------- Legacy-Launcher-Icon 1:1 (Basis 640x640) ----------
@@ -32,7 +32,7 @@ Run @('-f','lavfi','-i',"color=c=${navy}:s=640x640",'-vf',$vf,'-frames:v','1',$i
 $icon = @{ 'mdpi'=80; 'hdpi'=120; 'xhdpi'=160; 'xxhdpi'=240; 'xxxhdpi'=320 }
 foreach ($d in $icon.Keys) {
     $dir = Join-Path $res "mipmap-$d"
-    Run @('-i',$iconBase,'-vf',"scale=$($icon[$d]):$($icon[$d]):flags=lanczos",'-frames:v','1',(Join-Path $dir 'ic_launcher.png'))
+    Run @('-i',$iconBase,'-vf',"scale=$($icon[$d]):$($icon[$d]):flags=lanczos",'-frames:v','1',(Join-Path $dir 'ic_hometv.png'))
 }
 
 # ---------- Adaptive Icon: Vordergrund (transparent), Logo innerhalb der 66dp-Safe-Zone von 108dp ----------
@@ -43,7 +43,7 @@ Run @('-f','lavfi','-i',"color=c=black@0.0:s=864x864,format=rgba",'-f','lavfi','
 $fg = @{ 'mdpi'=108; 'hdpi'=162; 'xhdpi'=216; 'xxhdpi'=324; 'xxxhdpi'=432 }
 foreach ($d in $fg.Keys) {
     $dir = Join-Path $res "drawable-$d"; New-Item -ItemType Directory -Force $dir | Out-Null
-    Run @('-i',$fgBase,'-vf',"scale=$($fg[$d]):$($fg[$d]):flags=lanczos,format=rgba",'-frames:v','1',(Join-Path $dir 'ic_launcher_foreground.png'))
+    Run @('-i',$fgBase,'-vf',"scale=$($fg[$d]):$($fg[$d]):flags=lanczos,format=rgba",'-frames:v','1',(Join-Path $dir 'ic_hometv_foreground.png'))
 }
 
 # ---------- Amazon-Appstore-Grafik (nur fuer eine spaetere Store-Einreichung): 1280x720 PNG ohne Transparenz ----------

@@ -1,4 +1,4 @@
-﻿package de.thecraftedtech.hometv
+package de.thecraftedtech.hometv.satip
 
 /**
  * Bringt RTP-Pakete in Sequenzreihenfolge, bevor ihr MPEG-TS-Inhalt an den Player geht.

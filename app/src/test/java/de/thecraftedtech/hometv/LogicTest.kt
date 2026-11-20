@@ -1,5 +1,10 @@
 package de.thecraftedtech.hometv
 
+import de.thecraftedtech.hometv.channels.Channel
+import de.thecraftedtech.hometv.channels.Playlist
+import de.thecraftedtech.hometv.satip.RtpResequencer
+import de.thecraftedtech.hometv.satip.TsInspector
+
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

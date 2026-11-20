@@ -1,5 +1,9 @@
 package de.thecraftedtech.hometv
 
+import de.thecraftedtech.hometv.channels.Playlist
+import de.thecraftedtech.hometv.satip.LocalFeed
+import de.thecraftedtech.hometv.satip.SatIpSession
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue

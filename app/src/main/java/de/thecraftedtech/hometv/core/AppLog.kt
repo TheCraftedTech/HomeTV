@@ -1,4 +1,4 @@
-package de.thecraftedtech.hometv
+package de.thecraftedtech.hometv.core
 
 import android.content.Context
 import android.util.Log

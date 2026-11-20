@@ -5,7 +5,7 @@
 ```
 scripts\build-release.bat
 ```
-Ergebnis: **`build\HomeTV.apk`** (Application-ID `de.thecraftedtech.hometv`, **Version 1.1.0 / Code 2**, minSdk 22, targetSdk 34). Dieselbe Signatur wie 1.0.0 (gleicher Keystore) – ein Update mit `adb install -r` behält die App-Daten.
+Ergebnis: **`build\HomeTV.apk`** (Application-ID `de.thecraftedtech.hometv`, **Version 1.2.0 / Code 3**, minSdk 22, targetSdk 34). Dieselbe Signatur wie 1.0.0/1.1.0 (gleicher Keystore, SHA-256 `cbd3c252…`, vor dem Bau gegen die installierte Version geprüft) – ein Update mit `adb install -r` behält die App-Daten.
 Das Skript setzt `JAVA_HOME` (JDK 21), `ANDROID_HOME`, `GRADLE_USER_HOME` und `ANDROID_USER_HOME` auf Ordner **im Projekt** –
 nichts wird global installiert oder verändert. Es prüft am Ende die Signatur.
 
@@ -48,32 +48,22 @@ dieses Projekt betreibt dafür bewusst keinen Server; Weg A/B ist einfacher.
 - Auf dem Fire TV: Startbildschirm → *Apps* → **Home TV** (zuletzt installierte Apps stehen ganz hinten; „Alle Apps anzeigen").
 - Oder per ADB: `tools\platform-tools\adb.exe -s 192.168.1.134:5555 shell am start -n de.thecraftedtech.hometv/.MainActivity`
 
-Die App öffnet **Das Erste HD** (nach einem Update ggf. mit den zuletzt gespeicherten Einstellungen). Fernbedienung (vollständige Tabelle mit Keycodes: `docs/firetv-setup.md`, Abschnitt 4):
+Die App öffnet den zuletzt gesehenen Sender (Einstellung; sonst Das Erste HD). Bedienung: Kurzfassung in der README, vollständig in `docs/ui-and-controls.md`
+(CH+/CH− oder ▲▼ = Sender, ▶ = Senderliste, ◀ oder Menü = Einstellungen, OK = Info-Leiste, Menü lang = Debug-Overlay nur bei aktivem Debug-Modus).
 
-| Taste | Funktion |
-|---|---|
-| **CH+ / CH−** (Keycode 166 / 167) | nächster / vorheriger Sender (mit Umlauf, 97 Sender); ▲/▼ ohne Overlay als Alias |
-| OK (Mitte) | Info-Overlay ein/aus (alle Messwerte); bei Fehleranzeige: erneut versuchen |
-| ▲ ▼ (Overlay offen) | Puffer 1000 / 2000 / 3000 / 5000 ms |
-| ◀ ▶ (Overlay offen) | Audio-Versatz −/+ 50 ms |
-| Menü (≡) | Übergabemodus TCP → UDP → direkt |
-| Play/Pause | Bild einfrieren / danach live neu starten |
-| Zurück | Overlay schließen, sonst App beenden |
+## 4. Was du auf dem Fernseher prüfen sollst (Version 1.2.0)
 
-## 4. Was du auf dem Fernseher prüfen sollst
+**Wichtig vorab:** Version 1.1.0 lief bei dir gut – bitte zuerst prüfen, dass 1.2.0 **nicht schlechter** ist (Bild nach ≈ 5 s, Ton synchron, keine Sprünge).
 
-1. **Icon/Banner:** Wie sieht **Home TV** in der Fire-TV-App-Übersicht aus (Schriftzug „Home TV", blauer Strich, nicht abgeschnitten/verzerrt)? Und in *Einstellungen → Anwendungen*?
-2. **Start:** Erscheint nach wenigen Sekunden **Das Erste HD**? (Mit dem Start-Gate + 2 s Puffer sind ca. 4–6 s zu erwarten.) OK drücken → Zeile „Bild nach" notieren.
-3. **Synchronität:** Ist der Ton lippensynchron? Falls nicht: OK drücken, mit ◀ ▶ den Audio-Versatz verschieben, bis es passt, und den Wert notieren
-   (Sprecher in Nachrichten gut geeignet; Tagesschau).
-4. **Bildqualität:** Ruckler, Sprünge, kurze Aussetzer, Blockbildung/Kacheln? **Mindestens 5 Minuten** beobachten, auch gleich nach dem Einschalten (Start-Gate!).
-5. **Puffer vergleichen:** Overlay offen, ▲ drücken (1000 → 2000 → 3000 → 5000 ms). Wird es mit größerem Puffer ruhiger? Wie stark stört die Verzögerung
-   (Vergleich mit einer Uhr/zweitem TV)? Welcher Wert gefällt dir?
-6. **Senderwechsel:** CH+ und CH− (falls deine Fernbedienung diese Tasten hat; sonst ▲/▼ ohne Overlay). Erscheint Ladekreis und Banner „Nr Name"? Wie lange bis zum
-   Bild? Läuft es nach 10× schnellem Umschalten sauber weiter? Ein Sender ohne Bild (verschlüsselt) sollte „Kein Bild: <Sender>" zeigen.
-7. **Overlay:** Zeigt es Sender, Modus, Video (h264 1280x720 50 fps), Audio (AC-3), **Decoder** (MediaCodec/Hardware?), Netz-/TS-/VLC-Zähler? Welcher *Modus* steht dort?
-8. **Play/Pause**, **Zurück** (Overlay schließen → App beenden), erneutes Öffnen.
-9. Danach `scripts\pull-log.bat` ausführen (oder mir erlauben, das Log per ADB zu lesen) – die `STATS`-Zeilen zeigen, wo Fehler entstehen (siehe `docs/firetv-setup.md`, Abschnitt 6).
+1. **Update:** `scripts\install-firetv.bat` (behält Einstellungen). Starten. Kommt das Bild? Wie lange dauert es (OK → Info-Leiste; mit Debug-Modus steht die genaue Zeit im Overlay/Log)?
+2. **Icon/Banner:** Zeigt der Startbildschirm/„Apps" jetzt das neue Banner (Schriftzug „Home TV" mit blauem Strich)? Wenn nicht: Fire TV neu starten (*Einstellungen → Mein Fire TV → Neu starten*), danach ggf. Appstore-Cache leeren (siehe `firetv-limits.md`, Abschnitt 2).
+3. **Senderwechsel:** CH+/CH− (falls vorhanden) oder ▲▼. Erscheint sofort Nummer + Name (+ Programm)? Dann **5× schnell** CH+ drücken: lädt nur der letzte Sender? Gedrückthalten: schaltet es zügig und kontrolliert durch?
+4. **Senderliste:** ▶ drücken. Aktueller Sender markiert? ▲▼ scrollt flüssig (auch halten)? OK startet den Sender, Zurück schließt, ohne dass die Wiedergabe unterbrochen wird?
+5. **Einstellungen:** ◀ bzw. Menü. Alle Bereiche erreichbar und gut lesbar? Audio-Versatz ändern, Puffer ändern (Sender startet beim Schließen neu).
+6. **Debug:** OK öffnet **nur** die Info-Leiste (kein Debug-Menü mehr). Debug-Modus einschalten (*Einstellungen → Debugging*), danach **Menü lang** drücken → Overlay. Ausschalten → Overlay erscheint nie wieder.
+7. **Programmführer (optional):** *Einstellungen → Programmführer → XMLTV-URL* eintragen. Wie viele Sender werden zugeordnet („Zugeordnete Sender")? Erscheint die laufende Sendung beim Umschalten und in der Senderliste?
+8. **Tasten:** Kommt Power/Lauter/Leiser/Stumm bei der App an? (`scripts\key-monitor.bat` zeigt die Kernel-Ebene, im App-Log stehen die `Key`-Zeilen.) Was passiert, wenn du den **Fernseher** ausschaltest – bleibt der Fire TV an?
+9. **Dauerbetrieb:** mindestens 5 Minuten schauen, besser 30+; danach `scripts\pull-log.bat` (oder mir das Lesen per ADB erlauben) – `STATS`-, `TIMELINE`- und `Key`-Zeilen zeigen, wo etwas hakt. Parallel `scripts\udp-monitor.ps1` für lokale UDP-Verluste.
 ## 5. Deinstallation der App
 ```
 tools\platform-tools\adb.exe -s 192.168.1.134:5555 uninstall de.thecraftedtech.hometv

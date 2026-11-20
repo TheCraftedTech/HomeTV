@@ -1,4 +1,4 @@
-package de.thecraftedtech.hometv
+package de.thecraftedtech.hometv.satip
 
 import java.io.IOException
 import java.net.DatagramPacket

@@ -1,4 +1,4 @@
-package de.thecraftedtech.hometv
+package de.thecraftedtech.hometv.satip
 
 /**
  * Prueft den an den Player gelieferten MPEG-TS-Strom (nach der Resequenzierung):

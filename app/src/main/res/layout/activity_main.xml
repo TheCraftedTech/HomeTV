@@ -1,5 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- Grundebenen. Info-Leiste, Senderliste, Menue, Debug-Overlay, Lautstaerke und Meldungen werden in MainActivity
+     als Views darueber gelegt (siehe de.thecraftedtech.hometv.ui). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0A0A0C"
@@ -10,7 +13,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Ladezustand: dezenter Spinner + eine Zeile Status -->
+    <!-- Ladezustand: dezenter Spinner + Statuszeile -->
     <LinearLayout
         android:id="@+id/loading"
         android:layout_width="wrap_content"
@@ -22,15 +25,16 @@
         <ProgressBar
             android:id="@+id/spinner"
             style="?android:attr/progressBarStyleLarge"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:indeterminate="true" />
 
         <TextView
             android:id="@+id/status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
+            android:gravity="center"
             android:textColor="#B8BCC4"
             android:textSize="18sp" />
     </LinearLayout>
@@ -66,41 +70,8 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="OK: erneut versuchen    CH+/CH−: anderer Sender    Zurück: beenden"
+            android:text="OK: erneut versuchen    CH+/CH−: anderer Sender    Menü: Einstellungen"
             android:textColor="#8E939C"
             android:textSize="16sp" />
     </LinearLayout>
-
-    <!-- Kurzes Sender-Banner beim Senderwechsel -->
-    <TextView
-        android:id="@+id/banner"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|start"
-        android:layout_margin="48dp"
-        android:background="#B3000000"
-        android:paddingStart="24dp"
-        android:paddingTop="12dp"
-        android:paddingEnd="24dp"
-        android:paddingBottom="12dp"
-        android:textColor="#FFFFFF"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
-
-    <!-- Info-Overlay (OK-Taste) -->
-    <TextView
-        android:id="@+id/overlay"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_margin="32dp"
-        android:background="#B3000000"
-        android:fontFamily="monospace"
-        android:lineSpacingExtra="3dp"
-        android:padding="16dp"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp"
-        android:visibility="gone" />
 </FrameLayout>
-

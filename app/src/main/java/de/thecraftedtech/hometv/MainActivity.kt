@@ -1,107 +1,131 @@
 package de.thecraftedtech.hometv
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.content.IntentFilter
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.text.InputType
+import android.view.Gravity
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.TextView
-import org.videolan.libvlc.LibVLC
-import org.videolan.libvlc.Media
-import org.videolan.libvlc.MediaPlayer
-import org.videolan.libvlc.interfaces.IMedia
+import de.thecraftedtech.hometv.channels.Channel
+import de.thecraftedtech.hometv.channels.Playlist
+import de.thecraftedtech.hometv.core.AppLog
+import de.thecraftedtech.hometv.epg.EpgRepository
+import de.thecraftedtech.hometv.playback.PlaybackManager
+import de.thecraftedtech.hometv.settings.AppSettings
+import de.thecraftedtech.hometv.settings.SettingItem
+import de.thecraftedtech.hometv.settings.SettingsEnv
+import de.thecraftedtech.hometv.settings.SettingsModel
+import de.thecraftedtech.hometv.settings.SharedPrefsStore
+import de.thecraftedtech.hometv.ui.ChannelListView
+import de.thecraftedtech.hometv.ui.DebugOverlayView
+import de.thecraftedtech.hometv.ui.InfoBarView
+import de.thecraftedtech.hometv.ui.MenuView
+import de.thecraftedtech.hometv.ui.MessageView
+import de.thecraftedtech.hometv.ui.VolumeIndicatorView
+import de.thecraftedtech.hometv.ui.dp
+import de.thecraftedtech.hometv.zap.HoldTracker
+import de.thecraftedtech.hometv.zap.Scheduler
+import de.thecraftedtech.hometv.zap.ZapController
 import org.videolan.libvlc.util.VLCVideoLayout
-import java.util.Locale
+import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Home TV: Live-TV von der FRITZ!Box (SAT>IP) auf dem Fire TV.
+ * Home TV – Host der Oberflaeche. Die Activity verbindet nur noch die Bausteine:
+ *   Wiedergabe  -> [PlaybackManager] (LibVLC, SAT>IP, Senderwechsel mit Abbruchlogik)
+ *   Senderwahl  -> [ZapController]   (Vorschau sofort, Laden erst nach Entprellung)
+ *   Programm    -> [EpgRepository]   (XMLTV, lokal gecacht, unabhaengig von der Wiedergabe)
+ *   Einstellungen -> [AppSettings] / [SettingsModel]
+ *   Darstellung -> Views in de.thecraftedtech.hometv.ui
  *
- * Wiedergabe: eigener SAT>IP-Client (Punch, Keep-Alive, TEARDOWN, Resequenzierung) -> lokaler Loopback-Feed
- * (TCP verlustfrei mit Rueckstau, alternativ UDP) -> LibVLC. Zusaetzlich "direkt": LibVLC oeffnet rtsp:// selbst.
- * Senderwechsel: CH+ / CH- (Keycode 166 / 167) – die alte Session wird per TEARDOWN beendet, erst dann beginnt die neue.
+ * Tasten: siehe docs/firetv-setup.md. Alle Eingaben laufen zentral durch [dispatchKeyEvent] (kein Android-Fokus).
  */
-class MainActivity : Activity() {
-
-    private enum class UiState { LOADING, PLAYING, PAUSED, ERROR }
+class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listener, EpgRepository.Listener, MenuView.Callbacks {
 
     private val tag = "HomeTV"
     private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "hometv-io") }
+    private val playWorker = Executors.newSingleThreadExecutor { r -> Thread(r, "hometv-play") }
+    private val epgWorker = Executors.newSingleThreadExecutor { r -> Thread(r, "hometv-epg") }
 
+    private lateinit var settings: AppSettings
+    private lateinit var playback: PlaybackManager
+    private lateinit var epgRepo: EpgRepository
+    private lateinit var zap: ZapController
+    private lateinit var audio: AudioManager
+
+    private lateinit var root: FrameLayout
     private lateinit var videoLayout: VLCVideoLayout
     private lateinit var loading: View
     private lateinit var status: TextView
     private lateinit var errorBox: View
     private lateinit var errorTitle: TextView
     private lateinit var errorText: TextView
-    private lateinit var overlay: TextView
-    private lateinit var banner: TextView
-    private lateinit var settings: Settings
-
-    private var libVlc: LibVLC? = null
-    private var player: MediaPlayer? = null
-    private var session: SatIpSession? = null
-    private var feed: LocalFeed? = null
+    private lateinit var infoBar: InfoBarView
+    private lateinit var channelList: ChannelListView
+    private lateinit var menu: MenuView
+    private lateinit var debugOverlay: DebugOverlayView
+    private lateinit var volumeView: VolumeIndicatorView
+    private lateinit var message: MessageView
 
     private var channels: List<Channel> = emptyList()
     private var channelSource = "–"
-    private var index = 0
-    private var transport = Transport.TCP
-    private val triedTransports = HashSet<Transport>()
-    private var everPlayed = false
-    private var state = UiState.LOADING
-    private var generation = 0
     private var started = false
-    private var overlayVisible = false
+    private var playbackActive = false
     private var requestedChannel: String? = null
-
-    // Messwerte fuer Overlay/Log
     private var lastKey = "–"
-    private var videoInfo = "–"
-    private var audioInfo = "–"
-    private var decoderInfo = "noch nicht ermittelt"
-    private var tuneStartedAt = 0L
-    private var timeToPictureMs = -1L
-    private var lastBytes = 0L
-    private var lastBytesAt = 0L
-    private var rateMbit = 0.0
-    private var maxGap10s = 0L
-    private var restartsAfterStall = 0
+    private var playbackDirty = false
+    private var infoAutoHide = false
+    private val consumedDown = HashSet<Int>()
+    private val zapHold = HoldTracker()
+    private val listHold = HoldTracker()
+    private var menuLongHandled = false
 
-    private val watchdog = Runnable { onNoPicture(hard = false) }
-    private val bannerHider = Runnable { banner.visibility = View.GONE }
-
-    private val overlayTicker = object : Runnable {
+    private val idleStop = Runnable {
+        AppLog.i(tag, "Inaktivitäts-Timer (${settings.idleStopHours} h ohne Tastendruck) – beende Wiedergabe")
+        stopPlayback(); finish()
+    }
+    private val infoHide = Runnable { infoBar.hide() }
+    private val listAutoClose = Runnable { closeChannelList() }
+    private val messageHide = Runnable { message.hide() }
+    private val volumeHide = Runnable { volumeView.hideAnimatedSafe() }
+    private val infoTicker = object : Runnable {
         override fun run() {
-            updateOverlay()
-            if (overlayVisible) main.postDelayed(this, 1000)
+            if (infoBar.visibility == View.VISIBLE) bindInfo(shownInfoIndex, shownInfoEpg)
+            main.postDelayed(this, 20_000)
         }
     }
-
-    /** Alle 10 s: Messwerte ins Log (die Datei ueberlebt, der logcat-Puffer nicht). */
-    private val statsLogger = object : Runnable {
+    private val debugTicker = object : Runnable {
         override fun run() {
-            if (state == UiState.PLAYING) logStats()
-            main.postDelayed(this, 10_000)
-        }
-    }
-
-    /** Datenstillstand waehrend der Wiedergabe (nur SAT>IP-Client-Modi): bis zu 2x neu starten, dann Fehler. */
-    private val stallChecker = object : Runnable {
-        override fun run() {
-            val s = session
-            if (state == UiState.PLAYING && s != null && s.lastPacketAgoMs > 8_000) {
-                AppLog.w(tag, "Datenstillstand > 8 s")
-                if (restartsAfterStall < 2) { restartsAfterStall++; tune(index) }
-                else showError("Stream unterbrochen", "Die FRITZ!Box sendet keine Daten mehr.", generation)
-                return
+            if (debugOverlay.isOpen) {
+                debugOverlay.update(playback.debugSnapshot(), channels.size, lastKey)
+                main.postDelayed(this, 1000)
             }
-            main.postDelayed(this, 2_000)
+        }
+    }
+    private var shownInfoIndex = 0
+    private var shownInfoEpg = true
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            when (i.action) {
+                Intent.ACTION_SCREEN_OFF -> { AppLog.i(tag, "Bildschirm aus – Wiedergabe beenden (Tuner freigeben)"); stopPlayback() }
+                Intent.ACTION_SCREEN_ON -> if (started) { AppLog.i(tag, "Bildschirm an"); startPlayback() }
+            }
         }
     }
 
@@ -111,30 +135,70 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
+        AppLog.init(this)
+        settings = AppSettings(SharedPrefsStore(this))
+        handleIntent(intent)
+        audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        root = findViewById(R.id.root)
         videoLayout = findViewById(R.id.video)
         loading = findViewById(R.id.loading)
         status = findViewById(R.id.status)
         errorBox = findViewById(R.id.error)
         errorTitle = findViewById(R.id.errorTitle)
         errorText = findViewById(R.id.errorText)
-        overlay = findViewById(R.id.overlay)
-        banner = findViewById(R.id.banner)
-        AppLog.init(this)
-        settings = Settings(this)
-        handleIntent(intent)
-        transport = settings.transport
+
+        playback = PlaybackManager(this, settings, main, playWorker, this)
+        epgRepo = EpgRepository(File(filesDir, "epg.bin"), settings, epgWorker, { r -> main.post(r) })
+        epgRepo.listener = this
+        zap = ZapController({ channels.size }, HandlerScheduler(), { settings.zapDebounceMs.toLong() }, this)
+
+        buildOverlays()
         hideSystemUi()
-        AppLog.i(tag, "Start: Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), Modus=${transport.key}, Puffer=${settings.cacheMs} ms, Audio-Versatz=${settings.audioDelayMs} ms")
+        AppLog.i(tag, "Start: Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), Modus=${settings.transport.key}, Puffer=${settings.cacheMs} ms, Audio-Versatz=${settings.audioDelayMs} ms, Debug=${settings.debugMode}, EPG=${settings.epgActive}")
+    }
+
+    private fun buildOverlays() {
+        val match = FrameLayout.LayoutParams.MATCH_PARENT
+        infoBar = InfoBarView(this)
+        channelList = ChannelListView(this)
+        channelList.subtitle = { ch -> if (settings.showEpgInChannelList && settings.epgActive) epgRepo.now(ch)?.title else null }
+
+        val env = SettingsEnv(
+            versionText = "${BuildConfig.VERSION_NAME} (Code ${BuildConfig.VERSION_CODE})",
+            channelInfo = { if (channels.isEmpty()) "keine geladen" else "${channels.size} (Quelle: $channelSource)" },
+            reloadChannels = { reloadChannels() },
+            epgStatus = { epgRepo.statusText() },
+            epgLastUpdate = { epgRepo.lastUpdateText() },
+            epgMatchInfo = { epgRepo.matchText() },
+            epgCacheInfo = { epgRepo.cacheText() },
+            refreshEpg = { epgRepo.refresh(force = true); showMessage("Programmführer wird aktualisiert …") },
+            clearEpgCache = { epgRepo.clearCache(); showMessage("Zwischenspeicher gelöscht"); channelList.refresh() },
+            showDebugOverlay = { menu.close(); showDebugOverlay() },
+            logPath = (getExternalFilesDir(null) ?: filesDir).absolutePath + "/hometv.log",
+        )
+        menu = MenuView(this, SettingsModel(settings, env).categories)
+        menu.callbacks = this
+
+        debugOverlay = DebugOverlayView(this)
+        volumeView = VolumeIndicatorView(this)
+        message = MessageView(this)
+
+        root.addView(infoBar, FrameLayout.LayoutParams(match, match))
+        root.addView(channelList, FrameLayout.LayoutParams(match, match))
+        root.addView(menu, FrameLayout.LayoutParams(match, match))
+        root.addView(debugOverlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { setMargins(dp(24), dp(24), 0, 0) })
+        root.addView(volumeView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { setMargins(0, dp(28), dp(36), 0) })
+        root.addView(message, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { setMargins(0, 0, 0, dp(110)) })
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIntent(intent)
-        transport = settings.transport
         if (started && channels.isNotEmpty()) {
-            requestedChannel?.let { name -> resolveChannel(name)?.let { index = it } }
-            tune(index)
+            requestedChannel?.let { name -> resolveChannel(name)?.let { zap.select(it) } } ?: playback.restartCurrent()
+            if (intent.hasExtra("epgUrl")) epgRepo.refresh(force = true)
         }
     }
 
@@ -150,21 +214,25 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        createPlayer()
-        begin()
+        started = true
+        registerReceiver(screenReceiver, IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) })
+        if ((getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive) startPlayback()
+        armIdleTimer()
     }
 
     override fun onStop() {
+        started = false
+        runCatching { unregisterReceiver(screenReceiver) }
         AppLog.i(tag, "onStop – beende Wiedergabe")
         stopPlayback()
-        releasePlayer()
+        closeAllLayers()
         main.removeCallbacksAndMessages(null)
-        started = false
         super.onStop()
     }
 
     override fun onDestroy() {
-        io.shutdownNow()
+        playWorker.shutdownNow()
+        epgWorker.shutdownNow()
         super.onDestroy()
     }
 
@@ -183,399 +251,414 @@ class MainActivity : Activity() {
                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
     }
 
-    // ------------------------------------------------------------------ Player
+    // ------------------------------------------------------------------ Wiedergabe starten/stoppen
 
-    private fun createPlayer() {
-        if (player != null) return
-        // -vv: ausfuehrliches VLC-Log (logcat Tag "VLC"); die App liest daraus den Decoder (mediacodec/avcodec)
-        val vlc = LibVLC(this, arrayListOf("-vv"))
-        libVlc = vlc
-        val mp = MediaPlayer(vlc)
-        mp.attachViews(videoLayout, null, false, false)
-        mp.setEventListener { ev -> val g = generation; main.post { if (g == generation) onPlayerEvent(ev) } }
-        player = mp
-    }
-
-    private fun releasePlayer() {
-        val mp = player; player = null
-        val vlc = libVlc; libVlc = null
-        runCatching { mp?.setEventListener(null) }
-        runCatching { mp?.stop() }
-        runCatching { mp?.detachViews() }
-        runCatching { mp?.release() }
-        runCatching { vlc?.release() }
-    }
-
-    // ------------------------------------------------------------------ Start / Senderwechsel
-
-    private fun begin() {
-        if (started) return
-        started = true
-        triedTransports.clear()
-        restartsAfterStall = 0
-        val gen = ++generation
-        if (channels.isNotEmpty()) { tune(index); return }
-        setState(UiState.LOADING, "Lade Senderliste von ${BuildConfig.FRITZBOX_HOST} …")
-        io.execute {
+    private fun startPlayback() {
+        if (playbackActive) return
+        playbackActive = true
+        playback.attach(videoLayout)
+        if (channels.isNotEmpty()) {
+            playback.tune(zap.current.coerceAtLeast(0))
+            main.postDelayed({ epgRepo.refreshIfStale() }, 25_000)
+            return
+        }
+        setLoading("Lade Senderliste von ${BuildConfig.FRITZBOX_HOST} …")
+        playWorker.execute {
             val r = runCatching { Playlist.load(this, BuildConfig.FRITZBOX_HOST) }
             main.post {
-                if (gen != generation) return@post
+                if (!playbackActive) return@post
                 r.onSuccess { loaded ->
-                    channels = loaded.channels
-                    channelSource = loaded.source
-                    index = requestedChannel?.let { resolveChannel(it) } ?: Playlist.defaultIndex(channels)
-                    AppLog.i(tag, "Senderliste: ${channels.size} Sender (Quelle: $channelSource), Start: ${index + 1} ${channels[index].name}")
-                    tune(index)
-                }.onFailure { e ->
-                    showError("Keine Senderliste", e.message ?: e.toString(), gen)
-                }
+                    applyChannels(loaded.channels, loaded.source)
+                    val start = requestedChannel?.let { resolveChannel(it) }
+                        ?: settings.lastChannelName?.takeIf { settings.startWithLastChannel }?.let { Playlist.indexOfName(channels, it).takeIf { i -> i >= 0 } }
+                        ?: Playlist.defaultIndex(channels)
+                    AppLog.i(tag, "Senderliste: ${channels.size} Sender (Quelle: $channelSource), Start: ${start + 1} ${channels[start].name}")
+                    zap.setCurrent(start)
+                    playback.tune(start)
+                    scheduleEpgWork()
+                }.onFailure { e -> showErrorScreen("Keine Verbindung zur FRITZ!Box", e.message ?: e.toString()) }
             }
         }
-    }
-
-    /**
-     * Wechselt auf Sender [newIndex] (mit Umlauf). Reihenfolge: Player stoppen -> alte SAT>IP-Session per TEARDOWN beenden
-     * (im Hintergrund-Thread) -> erst danach die neue Session starten. Veraltete Wechsel brechen ab (keine parallelen Streams).
-     */
-    private fun tune(newIndex: Int) {
-        if (channels.isEmpty()) return
-        index = Math.floorMod(newIndex, channels.size)
-        val gen = ++generation
-        main.removeCallbacks(watchdog); main.removeCallbacks(stallChecker)
-        timeToPictureMs = -1; videoInfo = "–"; audioInfo = "–"; decoderInfo = "noch nicht ermittelt"
-        lastBytes = 0; lastBytesAt = 0; rateMbit = 0.0
-        tuneStartedAt = System.currentTimeMillis()
-        val ch = channels[index]
-        setState(UiState.LOADING, "${index + 1}  ${ch.name}")
-        showBanner(ch)
-        AppLog.i(tag, "Sender ${index + 1}/${channels.size}: ${ch.name} (Modus ${transport.key}, Puffer ${settings.cacheMs} ms)")
-
-        val oldSession = session; session = null
-        val oldFeed = feed; feed = null
-        runCatching { player?.stop() }
-        io.execute {
-            oldSession?.stop(2000)               // TEARDOWN, bevor etwas Neues startet
-            runCatching { oldFeed?.close() }
-            main.post { if (gen == generation) startMedia(gen) }
-        }
-    }
-
-    private fun startMedia(gen: Int) {
-        val ch = channels[index]
-        val vlc = libVlc ?: return
-        val mp = player ?: return
-        val cache = settings.cacheMs
-        val media: Media
-        if (transport == Transport.DIRECT) {
-            media = Media(vlc, Uri.parse(ch.url))
-            media.addOption(":network-caching=$cache")
-        } else {
-            val f: LocalFeed = if (transport == Transport.TCP) TcpFeed() else UdpFeed()
-            f.start()
-            feed = f
-            media = Media(vlc, Uri.parse(f.url))
-            media.addOption(":network-caching=$cache") // UDP: Eingangspuffer = pts-delay
-            media.addOption(":tcp-caching=$cache")     // TCP
-        }
-        media.setHWDecoderEnabled(true, false)         // Hardware bevorzugt, nicht erzwungen
-        mp.media = media
-        media.release()
-        mp.play()                                      // Player lauscht/verbindet, bevor die Box angefordert wird
-        if (transport != Transport.DIRECT) {
-            val s = SatIpSession(ch.url, feed!!, object : SatIpSession.Listener {
-                override fun onState(text: String) { main.post { if (gen == generation && state == UiState.LOADING) status.text = "${index + 1}  ${ch.name}\n$text" } }
-                override fun onStreaming() { AppLog.i(tag, "Erste RTP-Daten nach ${System.currentTimeMillis() - tuneStartedAt} ms") }
-                override fun onError(text: String) { main.post { if (gen == generation) onSessionError(text, gen) } }
-            })
-            session = s
-            s.start()
-        }
-        main.postDelayed(watchdog, 10_000L + cache)
     }
 
     private fun stopPlayback() {
-        main.removeCallbacks(watchdog); main.removeCallbacks(stallChecker); main.removeCallbacks(statsLogger)
-        generation++
-        val s = session; session = null
-        val f = feed; feed = null
-        runCatching { player?.stop() }
-        s?.stop(2000)          // TEARDOWN vor dem Beenden
-        runCatching { f?.close() }
+        if (!playbackActive) return
+        playbackActive = false
+        zap.cancel()
+        playback.detach()
     }
 
-    // ------------------------------------------------------------------ Player-Ereignisse und Fehler
-
-    private fun onPlayerEvent(ev: MediaPlayer.Event) {
-        when (ev.type) {
-            MediaPlayer.Event.Playing -> applyAudioDelay()
-            MediaPlayer.Event.Vout -> if (ev.voutCount > 0) onPicture()
-            MediaPlayer.Event.EncounteredError -> { AppLog.e(tag, "LibVLC EncounteredError"); onNoPicture(hard = true) }
-            MediaPlayer.Event.EndReached -> {
-                AppLog.w(tag, "LibVLC EndReached")
-                if (state == UiState.PLAYING) showError("Wiedergabe beendet", "Der Stream wurde beendet.", generation)
-            }
-        }
+    private fun applyChannels(list: List<Channel>, source: String) {
+        channels = list
+        channelSource = source
+        playback.channels = list
+        epgRepo.channels = list
+        channelList.setChannels(list)
     }
 
-    private fun onPicture() {
-        main.removeCallbacks(watchdog)
-        if (state == UiState.PLAYING) return
-        timeToPictureMs = System.currentTimeMillis() - tuneStartedAt
-        if (!everPlayed) { everPlayed = true; settings.transport = transport }   // funktionierenden Weg merken
-        if (state != UiState.PAUSED) setState(UiState.PLAYING)
-        refreshTrackInfo()
-        applyAudioDelay()
-        AppLog.i(tag, "Bild nach $timeToPictureMs ms: $videoInfo | $audioInfo")
-        main.removeCallbacks(stallChecker); main.postDelayed(stallChecker, 4_000)
-        main.removeCallbacks(statsLogger); main.postDelayed(statsLogger, 10_000)
-        probeDecoder(retry = true)
-    }
-
-    private fun probeDecoder(retry: Boolean) {
-        val gen = generation
-        io.execute {
-            val d = DecoderProbe.probe()
+    private fun reloadChannels() {
+        showMessage("Lade Senderliste …")
+        playWorker.execute {
+            val r = runCatching { Playlist.load(this, BuildConfig.FRITZBOX_HOST) }
             main.post {
-                if (gen != generation) return@post
-                decoderInfo = d
-                AppLog.i(tag, "Decoder: $d")
-                if (retry && d.startsWith("unbekannt")) main.postDelayed({ if (gen == generation) probeDecoder(false) }, 5_000)
+                r.onSuccess { l ->
+                    val cur = channels.getOrNull(zap.current)?.name
+                    applyChannels(l.channels, l.source)
+                    val keep = cur?.let { Playlist.indexOfName(channels, it) }?.takeIf { it >= 0 }
+                    if (keep != null) zap.setCurrent(keep)
+                    showMessage("${l.channels.size} Sender geladen (${l.source})")
+                }.onFailure { showMessage("Senderliste nicht ladbar: ${it.message}") }
             }
         }
     }
 
-    private fun applyAudioDelay() {
-        runCatching { player?.audioDelay = settings.audioDelayMs * 1000L }
+    /** EPG: Cache sofort laden, Aktualisierung erst, wenn die Wiedergabe laeuft (kein Wettbewerb um die CPU beim Start). */
+    private fun scheduleEpgWork() {
+        epgWorker.execute { epgRepo.loadCache(); main.post { channelList.refresh() } }
+        main.postDelayed({ epgRepo.refreshIfStale() }, 25_000)
+        if (intent?.hasExtra("epgUrl") == true) epgRepo.refresh(force = true)
     }
 
-    private fun refreshTrackInfo() {
-        val m = player?.media ?: return
-        try {
-            for (i in 0 until m.trackCount) {
-                when (val t = m.getTrack(i)) {
-                    is IMedia.VideoTrack -> if (videoInfo == "–") videoInfo = String.format(
-                        Locale.US, "%s %dx%d %s", t.codec, t.width, t.height,
-                        if (t.frameRateDen > 0) String.format(Locale.US, "%.0f fps", t.frameRateNum.toDouble() / t.frameRateDen) else "",
-                    ).trim()
-                    is IMedia.AudioTrack -> if (audioInfo == "–") audioInfo = "${t.codec} ${t.channels} ch ${t.rate} Hz" + (t.language?.let { " ($it)" } ?: "")
-                    else -> Unit
-                }
-            }
-        } finally { m.release() }
+    // ------------------------------------------------------------------ PlaybackManager.Listener
+
+    override fun onStateChanged(state: PlaybackManager.State, channel: Channel?) {
+        when (state) {
+            PlaybackManager.State.LOADING -> { errorBox.visibility = View.GONE; loading.visibility = View.VISIBLE; status.text = loadingText() }
+            PlaybackManager.State.PLAYING -> { errorBox.visibility = View.GONE; loading.visibility = View.GONE }
+            PlaybackManager.State.PAUSED -> { loading.visibility = View.GONE; showInfo(zap.current, epg = true, autoHide = true) }
+            PlaybackManager.State.ERROR -> { loading.visibility = View.GONE }
+            PlaybackManager.State.IDLE -> Unit
+        }
+        if (infoBar.visibility == View.VISIBLE) bindInfo(shownInfoIndex, shownInfoEpg)
     }
 
-    private fun onSessionError(text: String, gen: Int) {
-        AppLog.w(tag, "Session-Fehler: $text")
-        if (!everPlayed && fallbackTransport()) return
-        showError(channels.getOrNull(index)?.name ?: "Fehler", text, gen)
+    override fun onStatus(text: String) { if (playback.state == PlaybackManager.State.LOADING) status.text = "${loadingText()}\n$text" }
+
+    private fun loadingText(): String = channels.getOrNull(zap.current)?.let { "${zap.current + 1}  ${it.name}" } ?: ""
+
+    override fun onPicture(channel: Channel, timeToPictureMs: Long) {
+        if (infoBar.visibility == View.VISIBLE && infoAutoHide) {
+            main.removeCallbacks(infoHide)
+            main.postDelayed(infoHide, settings.infoBarSeconds * 1000L)
+        }
     }
 
-    private fun onNoPicture(hard: Boolean) {
-        if (state == UiState.PLAYING || state == UiState.PAUSED) return
-        AppLog.w(tag, "Kein Bild (${if (hard) "Fehler" else "Zeitüberschreitung"}) im Modus ${transport.key}")
-        if (!everPlayed && fallbackTransport()) return
-        val got = session?.stats()?.packets ?: 0
-        val ch = channels.getOrNull(index)?.name ?: ""
-        val detail = if (transport != Transport.DIRECT && got == 0L)
-            "Von der FRITZ!Box kommen keine Daten an (UDP). Prüfe, ob Fire TV und FRITZ!Box im selben Netz sind und ob die Box einen freien Tuner hat."
-        else "Es konnte kein Bild aufgebaut werden. Der Sender ist evtl. verschlüsselt oder nicht empfangbar."
-        showError("Kein Bild: $ch", detail, generation)
-    }
+    override fun onError(channel: Channel?, title: String, text: String) { showErrorScreen(title, text) }
 
-    /** Vor dem ersten erfolgreichen Bild: TCP -> UDP -> direkt. Gibt true zurueck, wenn ein neuer Versuch gestartet wurde. */
-    private fun fallbackTransport(): Boolean {
-        triedTransports.add(transport)
-        val next = Transport.values().firstOrNull { it !in triedTransports } ?: return false
-        AppLog.w(tag, "Fallback: ${transport.key} -> ${next.key}")
-        transport = next
-        tune(index)
-        return true
-    }
-
-    // ------------------------------------------------------------------ UI
-
-    private fun setState(s: UiState, text: String? = null) {
-        state = s
-        errorBox.visibility = if (s == UiState.ERROR) View.VISIBLE else View.GONE
-        loading.visibility = if (s == UiState.LOADING) View.VISIBLE else View.GONE
-        if (text != null) status.text = text
-        updateOverlay()
-    }
-
-    private fun showError(title: String, text: String, gen: Int) {
-        if (gen != generation) return
-        AppLog.e(tag, "Fehler: $title – $text")
-        generation++
-        main.removeCallbacks(watchdog); main.removeCallbacks(stallChecker)
-        val s = session; session = null
-        val f = feed; feed = null
-        runCatching { player?.stop() }
-        io.execute { s?.stop(2000); runCatching { f?.close() } }
+    private fun showErrorScreen(title: String, text: String) {
+        loading.visibility = View.GONE
         errorTitle.text = title
         errorText.text = text
-        setState(UiState.ERROR)
+        errorBox.visibility = View.VISIBLE
     }
 
-    private fun showBanner(ch: Channel) {
-        banner.text = "${index + 1}   ${ch.name}"
-        banner.visibility = View.VISIBLE
-        main.removeCallbacks(bannerHider)
-        main.postDelayed(bannerHider, 3_000)
+    private fun setLoading(text: String) {
+        errorBox.visibility = View.GONE
+        loading.visibility = View.VISIBLE
+        status.text = text
     }
 
-    private fun vlcStats(): IMedia.Stats? {
-        val m = player?.media ?: return null
-        return try { m.stats } catch (_: Exception) { null } finally { m.release() }
+    // ------------------------------------------------------------------ ZapController.Listener
+
+    override fun onPreview(index: Int) {
+        // sofort: Banner + Programm der vorgemerkten Auswahl (noch vor dem Laden des Bildes)
+        showInfo(index, epg = settings.showEpgOnZap, autoHide = true, preview = true)
     }
 
-    private fun updateOverlay() {
-        if (!overlayVisible) { overlay.visibility = View.GONE; return }
-        val s = session?.stats()
-        if (s != null) {
-            val now = System.currentTimeMillis()
-            if (lastBytesAt != 0L && now > lastBytesAt) rateMbit = (s.bytes - lastBytes) * 8.0 / ((now - lastBytesAt) * 1000.0)
-            lastBytes = s.bytes; lastBytesAt = now
+    override fun onCommit(index: Int) {
+        channels.getOrNull(index)?.let { settings.lastChannelName = it.name }
+        channelList.setPlaying(index)
+        errorBox.visibility = View.GONE
+        playback.tune(index)
+        showInfo(index, epg = settings.showEpgOnZap, autoHide = true)
+    }
+
+    // ------------------------------------------------------------------ Info-Leiste
+
+    private fun showInfo(index: Int, epg: Boolean, autoHide: Boolean, preview: Boolean = false) {
+        if (channels.isEmpty()) return
+        shownInfoIndex = index.coerceIn(0, channels.size - 1)
+        shownInfoEpg = epg
+        infoAutoHide = autoHide
+        bindInfo(shownInfoIndex, epg, preview)
+        infoBar.show()
+        main.removeCallbacks(infoHide)
+        // waehrend des Ladens/Vorwaehlens bleibt die Leiste stehen; sie blendet erst nach dem Bild bzw. der Auswahl aus
+        val loadingNow = playback.state == PlaybackManager.State.LOADING || zap.pending != null
+        if (autoHide && !loadingNow) main.postDelayed(infoHide, settings.infoBarSeconds * 1000L)
+    }
+
+    private fun bindInfo(index: Int, epg: Boolean, preview: Boolean = false) {
+        val ch = channels.getOrNull(index) ?: return
+        val now = System.currentTimeMillis()
+        val epgOn = settings.epgActive && epg
+        val st = when {
+            preview || index != zap.current -> ""
+            else -> when (playback.state) {
+                PlaybackManager.State.LOADING -> "Lädt …"
+                PlaybackManager.State.PLAYING -> "Live"
+                PlaybackManager.State.PAUSED -> "Pausiert"
+                PlaybackManager.State.ERROR -> "Fehler"
+                PlaybackManager.State.IDLE -> ""
+            }
         }
-        val st = vlcStats()
-        val ch = channels.getOrNull(index)
-        val cache = settings.cacheMs
-        overlay.text = buildString {
-            append("Home TV ${BuildConfig.VERSION_NAME} (Code ${BuildConfig.VERSION_CODE})\n")
-            append("Sender    : ${if (ch != null) "${index + 1}/${channels.size}  ${ch.name}  [Liste: $channelSource]" else "–"}\n")
-            append("Status    : ${state.name.lowercase()}   Bild nach: ${if (timeToPictureMs >= 0) "%.1f s".format(Locale.US, timeToPictureMs / 1000.0) else "–"}\n")
-            append("Modus     : ${transport.label}\n")
-            append("Puffer    : $cache ms (zusätzliche Live-Verzögerung ≈ $cache ms + Box/Decoder)\n")
-            append("Video     : $videoInfo\n")
-            append("Audio     : $audioInfo   Versatz: ${"%+d".format(settings.audioDelayMs)} ms\n")
-            append("Decoder   : $decoderInfo\n")
-            if (s != null) {
-                append("Netz      : ${"%.1f".format(Locale.US, rateMbit)} Mbit/s, ${s.packets} RTP-Pakete, Jitter ${"%.1f".format(Locale.US, s.jitterMs)} ms\n")
-                append("RTP       : verloren ${s.lost}, umsortiert ${s.reordered}, spät/doppelt ${s.lateOrDuplicate}\n")
-                append("TS        : Fehler ${s.tsCcErrors} von ${s.tsPackets}, Sync ${s.tsBadSync}\n")
-                append("UDP-Puffer: ${s.rcvBufBytes / 1024} KiB   Feed: ${s.feedQueued / 1024} KiB wartend, ${s.feedOverflow} B verworfen\n")
-                append("Datenzeit : ${s.dataTimeMs} ms (PCR)${player?.let { "   VLC-Zeit: ${it.time} ms" } ?: ""}\n")
-                val gate = session?.gateOpenedAfterMs ?: -1
-                append("Start-Gate: ${if (gate >= 0) "offen nach $gate ms, ${(session?.gateDroppedBytes ?: 0) / 1024} KiB verworfen" else "wartet auf ruhigen Start"}\n")
-            } else append("Netz      : (direkter Modus – keine App-Messwerte)\n")
-            if (st != null) append("VLC       : korrupt ${st.demuxCorrupted}, Diskont. ${st.demuxDiscontinuity}, Bilder ${st.displayedPictures} (verloren ${st.lostPictures}), Audio verloren ${st.lostAbuffers}\n")
-            append("Taste     : $lastKey\n")
-            append("[▲▼ Puffer  ◀▶ Audio-Versatz  MENÜ Modus  CH+/CH− Sender]")
-        }
-        overlay.visibility = View.VISIBLE
+        infoBar.bind(ch, index + 1, if (epgOn) epgRepo.now(ch, now) else null, if (epgOn) epgRepo.next(ch, now) else null, epgOn, st, now)
     }
 
-    private fun logStats() {
-        val s = session?.stats()
-        val st = vlcStats()
-        val gap = session?.takeMaxGapMs() ?: 0
-        val sb = StringBuilder("STATS ${channels.getOrNull(index)?.name} ${transport.key} cache=${settings.cacheMs}")
-        if (s != null) {
-            sb.append(" | rx=${s.packets}pk/${s.bytes / 1024}KiB lost=${s.lost} reord=${s.reordered} late=${s.lateOrDuplicate}")
-            sb.append(" tsCC=${s.tsCcErrors}/${s.tsPackets} jitter=${"%.1f".format(Locale.US, s.jitterMs)}ms maxGap10s=${gap}ms")
-            sb.append(" feedQ=${s.feedQueued / 1024}KiB feedDrop=${s.feedOverflow}B dataT=${s.dataTimeMs}ms vlcT=${player?.time}ms")
-        }
-        if (st != null) {
-            sb.append(" | vlc corrupt=${st.demuxCorrupted} discont=${st.demuxDiscontinuity} shown=${st.displayedPictures} lostPic=${st.lostPictures} lostAudio=${st.lostAbuffers} decV=${st.decodedVideo} decA=${st.decodedAudio}")
-        }
-        AppLog.i("Stats", sb.toString())
+    // ------------------------------------------------------------------ Ebenen (Senderliste, Menue, Debug)
+
+    private fun openChannelList() {
+        if (channels.isEmpty()) return
+        infoBar.hide()
+        channelList.open(zap.pending ?: zap.current.coerceAtLeast(0))
+        armListTimeout()
     }
 
-    private fun toggleOverlay() {
-        overlayVisible = !overlayVisible
-        main.removeCallbacks(overlayTicker)
-        updateOverlay()
-        if (overlayVisible) main.post(overlayTicker)
+    private fun closeChannelList() {
+        main.removeCallbacks(listAutoClose)
+        if (channelList.isOpen) channelList.close()
+    }
+
+    private fun armListTimeout() {
+        main.removeCallbacks(listAutoClose)
+        val s = settings.channelListTimeoutSeconds
+        if (s > 0) main.postDelayed(listAutoClose, s * 1000L)
+    }
+
+    private fun openMenu() {
+        closeChannelList(); infoBar.hide(); closeDebugOverlay()
+        playbackDirty = false
+        menu.open()
+    }
+
+    override fun onClose() {
+        menu.close()
+        if (playbackDirty) { playbackDirty = false; playback.restartCurrent() }
+    }
+
+    private fun closeAllLayers() {
+        main.removeCallbacks(listAutoClose)
+        channelList.forceClose()
+        menu.forceClose()
+        infoBar.visibility = View.GONE
+        debugOverlay.visibility = View.GONE
+    }
+
+    private fun showDebugOverlay() {
+        if (!settings.debugMode) return
+        debugOverlay.update(playback.debugSnapshot(), channels.size, lastKey)
+        debugOverlay.visibility = View.VISIBLE
+        main.removeCallbacks(debugTicker); main.postDelayed(debugTicker, 1000)
+    }
+
+    private fun closeDebugOverlay() { debugOverlay.visibility = View.GONE; main.removeCallbacks(debugTicker) }
+
+    private fun showMessage(text: String) {
+        message.show(text)
+        main.removeCallbacks(messageHide); main.postDelayed(messageHide, 2600)
+    }
+
+    // ------------------------------------------------------------------ MenuView.Callbacks / EpgRepository.Listener
+
+    override fun onEditText(item: SettingItem.Text) {
+        val input = EditText(this).apply {
+            setText(item.current); hint = item.hint
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(item.label)
+            .setView(input)
+            .setPositiveButton("Speichern") { _, _ ->
+                item.commit(input.text.toString().trim())
+                onItemChanged(item)
+                menu.refresh()
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
+    override fun onItemChanged(item: SettingItem) {
+        when (item.id) {
+            "cache", "transport", "gate" -> playbackDirty = true
+            "idle" -> armIdleTimer()
+            "audio" -> playback.applyAudioDelay()
+            "debug" -> { if (!settings.debugMode) closeDebugOverlay(); showMessage(if (settings.debugMode) "Debug-Modus an – Menü-Taste lang drücken. VLC-Log ab nächstem Wiedergabestart." else "Debug-Modus aus") }
+            "epgUrl" -> { if (settings.epgActive) { epgRepo.refresh(force = true); showMessage("Programmführer wird geladen …") } }
+            "epgOn" -> if (settings.epgActive) epgRepo.refreshIfStale()
+            "epgDays" -> Unit
+        }
+        channelList.refresh()
+    }
+
+    override fun onEpgStatusChanged() {
+        if (menu.isOpen) menu.refresh()
+        if (channelList.isOpen) channelList.refresh()
+        if (infoBar.visibility == View.VISIBLE) bindInfo(shownInfoIndex, shownInfoEpg)
     }
 
     // ------------------------------------------------------------------ Fernbedienung
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        lastKey = "${KeyEvent.keyCodeToString(keyCode)} ($keyCode)"
-        AppLog.i(tag, "KeyDown $lastKey rep=${event.repeatCount}")
-        val repeatOk = keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
-        if (event.repeatCount > 0 && !repeatOk) return true // gehaltene Tasten ignorieren (ausser Audio-Versatz)
-        when (keyCode) {
-            KeyEvent.KEYCODE_CHANNEL_UP -> { tune(index + 1); return true }      // 166
-            KeyEvent.KEYCODE_CHANNEL_DOWN -> { tune(index - 1); return true }    // 167
-            KeyEvent.KEYCODE_DPAD_UP -> {
-                if (overlayVisible) changeCache(+1) else tune(index + 1)         // ohne Overlay: wie CH+ (Fire-TV-Fernbedienung hat keine CH-Tasten)
-                return true
-            }
-            KeyEvent.KEYCODE_DPAD_DOWN -> {
-                if (overlayVisible) changeCache(-1) else tune(index - 1)
-                return true
-            }
-            KeyEvent.KEYCODE_DPAD_LEFT -> { if (overlayVisible) changeAudioDelay(-50); return true }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> { if (overlayVisible) changeAudioDelay(+50); return true }
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (state == UiState.ERROR) tune(index) else toggleOverlay()
-                return true
-            }
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> { togglePause(); return true }
-            KeyEvent.KEYCODE_MEDIA_PLAY -> { if (state == UiState.PAUSED) togglePause(); return true }
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (state == UiState.PLAYING) togglePause(); return true }
-            KeyEvent.KEYCODE_MENU -> {
-                transport = transport.next(); settings.transport = transport; triedTransports.clear(); triedTransports.add(transport)
-                AppLog.i(tag, "Modus per Taste: ${transport.key}")
-                tune(index)
-                return true
-            }
-            KeyEvent.KEYCODE_BACK -> { if (overlayVisible) toggleOverlay() else finish(); return true }
+    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        val code = e.keyCode
+        if (e.action == KeyEvent.ACTION_DOWN) armIdleTimer()
+        if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) logKey(e)
+        // Tasten, die schon bei DOWN verbraucht wurden, auch bei UP verbrauchen
+        if (e.action == KeyEvent.ACTION_UP) {
+            if (code == KeyEvent.KEYCODE_MENU) return onMenuUp()
+            if (consumedDown.remove(code)) return true
+            return super.dispatchKeyEvent(e)
         }
-        updateOverlay()
-        return super.onKeyDown(keyCode, event)
+        if (e.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(e)
+        val handled = routeKey(e)
+        if (handled) consumedDown.add(code)
+        return handled || super.dispatchKeyEvent(e)
+    }
+
+    /** Inaktivitaets-Timer neu starten (jede Taste setzt ihn zurueck). 0 Stunden = aus. */
+    private fun armIdleTimer() {
+        main.removeCallbacks(idleStop)
+        val h = settings.idleStopHours
+        if (h > 0) main.postDelayed(idleStop, h * 3_600_000L)
+    }
+
+    private fun logKey(e: KeyEvent) {
+        val dev = InputDevice.getDevice(e.deviceId)?.name ?: "?"
+        lastKey = "${KeyEvent.keyCodeToString(e.keyCode)} (${e.keyCode}, scan ${e.scanCode})"
+        AppLog.i("Key", "DOWN $lastKey device='$dev'")
+    }
+
+    private fun routeKey(e: KeyEvent): Boolean {
+        val code = e.keyCode
+        // Lautstaerke/Stumm gelten in jeder Ebene (falls die Fernbedienung sie an die App weitergibt)
+        when (code) {
+            KeyEvent.KEYCODE_VOLUME_UP -> { changeVolume(AudioManager.ADJUST_RAISE); return true }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> { changeVolume(AudioManager.ADJUST_LOWER); return true }
+            KeyEvent.KEYCODE_VOLUME_MUTE -> { toggleMute(); return true }
+        }
+        if (code == KeyEvent.KEYCODE_MENU) return onMenuDown(e)
+        return when {
+            menu.isOpen -> menu.handleKey(code)
+            channelList.isOpen -> handleListKey(e)
+            else -> handlePlayerKey(e)
+        }
+    }
+
+    // ---- Menue-Taste: kurz = Menue, lang = Debug-Overlay (nur bei aktivem Debug-Modus)
+    private fun onMenuDown(e: KeyEvent): Boolean {
+        if (e.repeatCount == 0) menuLongHandled = false
+        if (e.repeatCount == 1 && !menuLongHandled && settings.debugMode && !menu.isOpen) {
+            menuLongHandled = true
+            if (debugOverlay.isOpen) closeDebugOverlay() else showDebugOverlay()
+        }
+        return true
+    }
+
+    private fun onMenuUp(): Boolean {
+        if (menuLongHandled) { menuLongHandled = false; return true }
+        if (menu.isOpen) onClose() else openMenu()
+        return true
+    }
+
+    // ---- Senderliste
+    private fun handleListKey(e: KeyEvent): Boolean {
+        armListTimeout()
+        val now = System.currentTimeMillis()
+        when (e.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> if (listHold.shouldStep(e.repeatCount, now)) channelList.moveSelection(-1)
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> if (listHold.shouldStep(e.repeatCount, now)) channelList.moveSelection(+1)
+            KeyEvent.KEYCODE_PAGE_UP -> channelList.moveSelection(-8)
+            KeyEvent.KEYCODE_PAGE_DOWN -> channelList.moveSelection(+8)
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (e.repeatCount == 0) { val sel = channelList.selected; closeChannelList(); zap.select(sel) }
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> closeChannelList()
+            KeyEvent.KEYCODE_DPAD_RIGHT -> Unit
+            else -> return false
+        }
+        return true
+    }
+
+    // ---- Wiedergabe (nichts geoeffnet)
+    private fun handlePlayerKey(e: KeyEvent): Boolean {
+        val code = e.keyCode
+        val now = System.currentTimeMillis()
+        // Debug-Overlay offen: ▲▼ Puffer, ◀▶ Audio-Versatz
+        if (debugOverlay.isOpen) {
+            when (code) {
+                KeyEvent.KEYCODE_DPAD_UP -> { if (e.repeatCount == 0) changeCache(+1); return true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { if (e.repeatCount == 0) changeCache(-1); return true }
+                KeyEvent.KEYCODE_DPAD_LEFT -> { changeAudioDelay(-50); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { changeAudioDelay(+50); return true }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BACK -> { if (e.repeatCount == 0) closeDebugOverlay(); return true }
+            }
+        }
+        when (code) {
+            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_UP -> { if (zapHold.shouldStep(e.repeatCount, now)) zap.step(+1); return true }
+            KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_DOWN -> { if (zapHold.shouldStep(e.repeatCount, now)) zap.step(-1); return true }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> { if (e.repeatCount == 0) openChannelList(); return true }
+            KeyEvent.KEYCODE_DPAD_LEFT -> { if (e.repeatCount == 0) openMenu(); return true }
+            KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_TV -> { if (e.repeatCount == 0) openChannelList(); return true }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (e.repeatCount > 0) return true
+                if (playback.state == PlaybackManager.State.ERROR) playback.restartCurrent()
+                else if (infoBar.visibility == View.VISIBLE) infoBar.hide()
+                else showInfo(zap.current, epg = true, autoHide = true)
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> { if (e.repeatCount == 0) playback.togglePause(); return true }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> { if (e.repeatCount == 0 && playback.state == PlaybackManager.State.PAUSED) playback.togglePause(); return true }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (e.repeatCount == 0 && playback.state == PlaybackManager.State.PLAYING) playback.togglePause(); return true }
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> {
+                if (e.repeatCount > 0) return true
+                if (infoBar.visibility == View.VISIBLE) infoBar.hide() else finish()
+                return true
+            }
+        }
+        return false
     }
 
     private fun changeCache(dir: Int) {
-        val presets = Settings.CACHE_PRESETS
+        val presets = AppSettings.CACHE_PRESETS
         val cur = settings.cacheMs
-        val next = if (dir > 0) presets.firstOrNull { it > cur } ?: presets.first()
-                   else presets.lastOrNull { it < cur } ?: presets.last()
-        settings.cacheMs = next
-        AppLog.i(tag, "Puffer per Taste: $next ms")
-        tune(index)
+        settings.cacheMs = if (dir > 0) presets.firstOrNull { it > cur } ?: presets.first() else presets.lastOrNull { it < cur } ?: presets.last()
+        AppLog.i(tag, "Puffer per Taste: ${settings.cacheMs} ms")
+        playback.restartCurrent()
     }
-    private fun changeAudioDelay(deltaMs: Int) {
-        settings.audioDelayMs = settings.audioDelayMs + deltaMs
-        applyAudioDelay()
+
+    private fun changeAudioDelay(delta: Int) {
+        settings.audioDelayMs = settings.audioDelayMs + delta
+        playback.applyAudioDelay()
         AppLog.i(tag, "Audio-Versatz: ${settings.audioDelayMs} ms")
-        updateOverlay()
     }
 
-    private fun togglePause() {
-        val mp = player ?: return
-        when (state) {
-            UiState.PLAYING -> {
-                main.removeCallbacks(stallChecker)
-                mp.pause()
-                setState(UiState.PAUSED)
-                if (!overlayVisible) toggleOverlay()
-            }
-            UiState.PAUSED -> tune(index) // Live-TV: nach der Pause live neu aufsetzen statt alten Puffer abzuspielen
-            else -> Unit
-        }
+    // ---- Lautstaerke / Stumm (kommt nur an, wenn Fire OS die Tasten an die App weitergibt – siehe Doku)
+    private fun changeVolume(dir: Int) {
+        if (playback.isMuted) { playback.setMuted(false) }
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, 0)
+        showVolume()
     }
-}
 
-/** Liest aus dem eigenen logcat (App darf nur den eigenen Prozess sehen), welcher Video-Decoder von LibVLC verwendet wird. */
-object DecoderProbe {
-    fun probe(): String {
-        return try {
-            val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "4000").redirectErrorStream(true).start()
-            val lines = p.inputStream.bufferedReader().useLines { seq -> seq.filter { it.contains("VLC", true) || it.contains("mediacodec", true) }.toList() }
-            p.destroy()
-            val mc = lines.filter { it.contains("mediacodec", true) }
-            val name = Regex("(OMX\\.[A-Za-z0-9_.\\-]+|c2\\.[A-Za-z0-9_.\\-]+)").find(mc.joinToString("\n"))?.value
-            val sw = lines.any { it.contains("avcodec", true) && it.contains("h264", true) }
-            mc.take(6).forEach { AppLog.i("Decoder", it.trim().take(220)) }
-            when {
-                mc.isNotEmpty() && name != null -> "MediaCodec (Hardware) – $name"
-                mc.isNotEmpty() -> "MediaCodec (Hardware), Codec-Name nicht im Log"
-                sw -> "avcodec (Software)"
-                else -> "unbekannt (keine passenden Logzeilen)"
-            }
-        } catch (e: Exception) {
-            "unbekannt (${e.javaClass.simpleName})"
+    private fun toggleMute() { playback.setMuted(!playback.isMuted); showVolume() }
+
+    private fun showVolume() {
+        volumeView.showVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC), playback.isMuted)
+        main.removeCallbacks(volumeHide); main.postDelayed(volumeHide, 1800)
+    }
+
+    private fun View.hideAnimatedSafe() { animate().cancel(); visibility = View.GONE }
+
+    // ------------------------------------------------------------------ Hilfsklassen
+
+    private inner class HandlerScheduler : Scheduler {
+        private val map = HashMap<Any, Runnable>()
+        override fun postDelayed(token: Any, delayMs: Long, action: Runnable) {
+            cancel(token)
+            val r = Runnable { map.remove(token); action.run() }
+            map[token] = r
+            main.postDelayed(r, delayMs)
         }
+        override fun cancel(token: Any) { map.remove(token)?.let { main.removeCallbacks(it) } }
     }
 }

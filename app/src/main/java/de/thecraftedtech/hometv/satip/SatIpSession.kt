@@ -1,4 +1,6 @@
-package de.thecraftedtech.hometv
+package de.thecraftedtech.hometv.satip
+
+import de.thecraftedtech.hometv.core.AppLog
 
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -46,6 +48,7 @@ class SatIpSession(
     private val rtspUrl: String,
     private val feed: LocalFeed,
     private val listener: Listener,
+    private val gateEnabled: Boolean = true,
 ) {
     interface Listener {
         fun onState(text: String)
@@ -81,18 +84,29 @@ class SatIpSession(
         val errBefore = inspector.ccErrors
         inspector.inspect(b, o, l)
         val now = System.currentTimeMillis()
+        if (!gateOpen && !gateEnabled) {
+            gateOpen = true; gateOpenedAtMs = now; gateOpenedAfterMs = 0
+        }
         if (!gateOpen) {
             if (gateFirstAtMs == 0L) gateFirstAtMs = now
             if (inspector.ccErrors != errBefore) gateLastErrAtMs = now
             val age = now - gateFirstAtMs
             if ((age >= GATE_MIN_MS && now - gateLastErrAtMs >= GATE_QUIET_MS) || age >= GATE_MAX_MS) {
                 gateOpen = true
+                gateOpenedAtMs = now
                 gateOpenedAfterMs = age
                 AppLog.i(tag, "Start-Gate offen nach $age ms (verworfen: ${gateDropped.get() / 1024} KiB, TS-Fehler in der Startphase: ${inspector.ccErrors})")
             }
         }
         if (gateOpen) feed.write(b, o, l) else gateDropped.addAndGet(l.toLong())
     }
+
+    /** Zeitleiste dieser Session (Wanduhr, ms; 0 = noch nicht erreicht) fuer die Startzeit-Analyse. */
+    @Volatile var startedAtMs = 0L; private set
+    @Volatile var playAckedAtMs = 0L; private set
+    @Volatile var firstPacketAtMs = 0L; private set
+    @Volatile var gateOpenedAtMs = 0L; private set
+    @Volatile var teardownDoneAtMs = 0L; private set
 
     val lastPacketAgoMs: Long get() = if (lastPacketAtMs == 0L) -1 else System.currentTimeMillis() - lastPacketAtMs
 
@@ -121,6 +135,7 @@ class SatIpSession(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        startedAtMs = System.currentTimeMillis()
         worker = Thread({ run() }, "satip-session").also { it.start() }
     }
 
@@ -149,8 +164,11 @@ class SatIpSession(
             ctrl = control
             control.connect(InetSocketAddress(host, this.port), 5000)
 
+            ensureRunning()
             request("OPTIONS", rtspUrl).requireOk("OPTIONS")
+            ensureRunning()
             request("DESCRIBE", rtspUrl, "Accept: application/sdp\r\n").requireOk("DESCRIBE")
+            ensureRunning()
 
             openUdpPair()
             val rtpPort = rtpSocket!!.localPort
@@ -169,10 +187,12 @@ class SatIpSession(
             val streamId = setup.header("com.ses.streamid")
             playUrl = if (streamId != null) "rtsp://$host:$port/stream=$streamId" else rtspUrl
 
+            ensureRunning()
             punch() // NAT/Firewall-Rueckpfad oeffnen, bevor die Box sendet
 
             receiver = Thread({ receiveLoop() }, "satip-rtp").also { it.start() }
             request("PLAY", playUrl).requireOk("PLAY")
+            playAckedAtMs = System.currentTimeMillis()
             listener.onState("Warte auf Daten …")
 
             // Haupt-Schleife: Punch wiederholen, Keep-Alive senden
@@ -205,6 +225,11 @@ class SatIpSession(
             runCatching { rtcpSocket?.close() }
             runCatching { ctrl?.close() }
         }
+    }
+
+    /** Bricht den Handshake ab, sobald die Session verworfen wurde (schnelles Umschalten: keine unnoetigen Ladeversuche). */
+    private fun ensureRunning() {
+        if (!running.get()) throw InterruptedException("abgebrochen")
     }
 
     private fun describe(e: Exception): String = when (e) {
@@ -297,6 +322,7 @@ class SatIpSession(
                 lastPacketAtMs = nowMs
                 if (first) {
                     first = false
+                    firstPacketAtMs = nowMs
                     listener.onStreaming()
                 }
                 resequencer.push(seq, buf, off, payload, nowMs)
@@ -312,6 +338,7 @@ class SatIpSession(
         try {
             s.soTimeout = 1500
             request("TEARDOWN", playUrl.ifEmpty { rtspUrl })
+            teardownDoneAtMs = System.currentTimeMillis()
             AppLog.i(tag, "TEARDOWN gesendet")
         } catch (e: Exception) {
             AppLog.w(tag, "TEARDOWN fehlgeschlagen: ${e.message}")

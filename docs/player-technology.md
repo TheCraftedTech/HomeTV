@@ -1,6 +1,6 @@
 # Player-Technologie – Entscheidung
 
-Stand: 2026-11-20 (Version 1.1.0, Phase 3 unten ab „Phase 3"). Grundlage: `docs/stream-analysis.md` (Messungen an der FRITZ!Box 6660 Cable).
+Stand: 2026-11-20 (Version 1.2.0; Phase 3 und Phase 4 unten). Grundlage: `docs/stream-analysis.md` (Messungen an der FRITZ!Box 6660 Cable).
 
 ## Entscheidung
 
@@ -194,3 +194,25 @@ Alle 10 s schreibt die App eine `STATS`-Zeile in `/sdcard/Android/data/de.thecra
 | Netzmessungen (Laptop): 300 s, 120 s, 6 Muxe | ✅ Abschnitt 12 in `stream-analysis.md` |
 | Fernbedienung (166/167), Overlay, Pufferumschaltung, Audio-Versatz, TCP-Loopback, Hardware-Decoder, A/V-Sync auf dem Fire TV | ⬜ **ungetestet** |
 | LibVLC auf dem Laptop (Puffervergleich) | ⬜ nicht durchgeführt (Desktop-VLC wurde nicht installiert) |
+---
+
+# Phase 4 (Version 1.2.0): Architektur, Senderwechsel, Messwerte
+
+**Pipeline unverändert.** Die in 1.1.0 am Fire TV bestätigte Wiedergabe (SAT>IP-Client, TCP-Loopback, 2000 ms Puffer, Start-Gate, Hardware-Decoder, A/V-Synchronisation über LibVLC-PCR-Uhr) wurde nur aus der Activity in `PlaybackManager` verschoben (siehe `docs/architecture.md`).
+Das Test-Feedback (Bild nach ≈ 5 s akzeptabel, Ton synchron, gute Bildqualität, keine sichtbaren Sprünge) ist die Messlatte; Puffer, Gate und Synchronisation wurden **nicht** verändert.
+
+Änderungen an der Wiedergabe:
+| Änderung | Grund |
+|---|---|
+| VLC-Log `-vv` nur im Debug-Modus | verbraucht CPU, überschwemmt den 256-KiB-logcat-Puffer (dadurch gingen die App-Logs der ersten Tests verloren); im Normalbetrieb nicht nötig |
+| Handshake-Abbruch zwischen den RTSP-Schritten | beim schnellen Umschalten keine unnötigen Verbindungsversuche zu verworfenen Sendern |
+| `TuneCoordinator`: nur der neueste Wechsel startet, TEARDOWN vor neuem Start, nie zwei Sessions | explizite Anforderung; Details und Tests in `architecture.md` |
+| Zeitleiste der Startphasen (`TIMELINE`) + Zeitstempel in `SatIpSession` | die ≈ 5 s Startzeit lassen sich auf dem Gerät aufschlüsseln |
+| Start-Gate in den Einstellungen abschaltbar (Standard an) | erlaubt am Gerät den direkten Vergleich ohne neuen Build |
+| App-Log-Abruf per Broadcast (`LogDumpReceiver`) | `adb pull` des Logs ist unter Android 11 gesperrt |
+
+**Startzeit:** Messung und Bilanz in `docs/stream-analysis.md`, Abschnitt 13. Kernaussage: Der Netzwerkanteil beträgt ≈ 0,12 s; die ≈ 5 s bestehen im Wesentlichen aus Start-Gate (≈ 1,5 s), LibVLC-Puffer (2,0 s) und Decoder-Start (≈ 1–1,5 s).
+Der Nutzer hat die ≈ 5 s als akzeptabel bezeichnet; deshalb wurde nichts „optimiert", sondern messbar gemacht.
+
+**Senderwechsel:** Entprellung statt Sofortladen (Standard 300 ms), Vorschau (Banner + EPG) sofort. Bei schnellem Umschalten entsteht ein einziger Ladevorgang.
+**Ressourcen:** Beim Wechsel werden Player gestoppt, Session per TEARDOWN beendet, Feed (Sockets, Threads, Puffer) geschlossen; bei `onStop`/Bildschirm aus zusätzlich LibVLC freigegeben.

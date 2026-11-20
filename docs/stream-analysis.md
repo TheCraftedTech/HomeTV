@@ -242,3 +242,40 @@ TS-Continuity-Fehler (= fehlende TS-Pakete im Strom, obwohl alle RTP-Pakete anka
 - Die App erfasst deshalb jetzt getrennt: RTP-Verluste/Reordering (Netz), TS-Fehler im gelieferten Strom (Quelle/Netz),
   Feed-Überlauf (lokal) und LibVLC-Zähler (`demuxCorrupted`, `demuxDiscontinuity`, `lostPictures`, `lostAbuffers`). Aus dem Vergleich dieser
   Zahlen im Log (`STATS`-Zeilen alle 10 s) folgt, **wo** ein Fehler entsteht.
+
+## 13. Startzeit eines Sender-Starts (Messung 2026-11-20, Version 1.2.0 Vorbereitung)
+
+Werkzeug: `tools/startup_timeline.py` (bildet den App-Ablauf nach, Laptop, WLAN, 6 Starts von Das Erste HD, je 6 s). Rohdaten: `tests/data/startup-timeline-daserste.txt`.
+
+| Phase | Median (min–max), ms ab Start |
+|---|---|
+| TCP-Connect | 19 (4–29) |
+| OPTIONS fertig | 28 (11–45) |
+| DESCRIBE fertig | 80 (59–97) |
+| SETUP fertig | 84 (62–101) |
+| PLAY fertig | 92 (67–111) |
+| **erstes RTP-Paket** | **118 (82–136)** |
+| erster PCR | 130 (91–175) |
+| **letzter TS-Fehler der Startphase** | **982 (971–987) nach dem ersten RTP-Paket, in allen 6 Starts** (6–19 Fehler je Start) |
+
+- Der **gesamte RTSP-Teil dauert ≈ 0,1 s**. Der Tuner ist praktisch sofort verfügbar; ein Kanalwechsel innerhalb desselben Muxes bringt keinen messbaren Vorteil, der Netzwerkanteil ist vernachlässigbar.
+- Die beschädigte Startphase der Box endet reproduzierbar bei ≈ 0,98 s. Damit öffnet das Start-Gate (mind. 1,2 s und 0,5 s Ruhe nach dem letzten Fehler) bei ≈ **1,5 s** (aus 971–987 ms + 500 ms = ≈ 1,48 s).
+- **Bildaufbau im Strom:** Das ARD-Video enthält **keine IDR-Frames** (NAL-Typ 5: 0 von 5 994 Bildern), sondern Nicht-IDR-Slices mit Recovery-Point-SEI; **SPS/PPS wiederholen sich alle ≈ 0,97 s** (123 in 120 s) – das sind die Einstiegspunkte für den Decoder (Wartezeit bis zum nächsten Einstieg im Mittel ≈ 0,5 s).
+
+### Bilanz der ~5 s bis zum Bild (aus den Messungen + Konfiguration)
+| Anteil | ≈ s | Beeinflussbar? |
+|---|---:|---|
+| RTSP-Handshake bis erstes Paket | 0,12 | nein (schon minimal) |
+| Beschädigte Startphase abwarten (Start-Gate) | ≈ 1,5 | ja, aber nur mit Risiko: Gate-Zeit ist an die gemessene Fehlerdauer (≈ 0,98 s) gekoppelt; abschaltbar in den Einstellungen (Bild früher, aber ggf. Blöcke in der ersten Sekunde) |
+| LibVLC-Puffer (`pts-delay`) | 2,0 | ja – Konfigurationswert (Menü: 1000/2000/3000/5000 ms); 1000 ms würde ≈ 1 s sparen, ist aber **am Gerät nicht verglichen** |
+| LibVLC-/MediaCodec-Start + Einstiegspunkt | ≈ 1–1,5 | kaum; auf dem Gerät noch nicht aufgeschlüsselt |
+
+Entscheidung: **Gate- und Puffer-Standardwerte bleiben unverändert** (1.1.0 ist am Gerät bestätigt, und die Anforderung lautet, funktionierende Synchronisation nicht ohne Messung zu verändern).
+Die App protokolliert dafür ab 1.2.0 bei jedem Sender-Start eine `TIMELINE`-Zeile (`tune=0 session=… PLAY_ok=… erstes_RTP=… Gate_offen=… VLC_Playing=… Bild=…` in ms) im App-Log und im Debug-Overlay.
+Nach einem Test auf dem Fire TV zeigt sie, wie sich die ≈ 5 s tatsächlich verteilen – erst darauf lässt sich seriös entscheiden, ob z. B. ein 1000-ms-Puffer oder ein kürzeres Gate lohnt.
+Ein weiterer, **nicht umgesetzter** Hebel (Idee): Das Gate könnte an den nächsten SPS/PPS-Einstiegspunkt nach der Startphase gekoppelt werden (spart im Mittel ≈ 0,4 s), erfordert aber Replay von PAT/PMT und ist ohne Gerätetest riskant.
+
+## 14. UDP-Verluste auf dem Fire TV (nur Zählerstand, keine Zuordnung möglich)
+`/proc/net/snmp` am Fire TV (Boot 18:58, Messung 20:17): `InDatagrams = 518 074`, **`RcvbufErrors = 1 520`** (0,29 %), über 20 s im Leerlauf unverändert; `rmem_max = 8 MiB`.
+Die Verluste sind also während der Wiedergaben entstanden, aber ohne Messung vor/nach einer einzelnen Sitzung nicht Version/Modus zuordenbar (UDP-Loopback aus 1.0.0 zählt jedes Paket doppelt und hat nur ≈ 0,4 s Pufferreserve).
+Zuordnung künftig mit `scripts\udp-monitor.ps1` (zeigt die Verluste je 5 s live) und der `STATS`-Zeile des App-Logs (`feedDrop`, `lost`, `tsCC`, `vlc corrupt`).

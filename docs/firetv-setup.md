@@ -86,48 +86,50 @@ In VLC unter *Streams* diese HTTP-Adresse öffnen → die Senderliste erscheint,
 | Ladekreis, nie Bild | wahrscheinlich NAT/UDP-Problem (kein Punch) – der Modus „SAT>IP-Client" der App ist dann der richtige |
 | Fehlermeldung | Meldung notieren (Fehlertext) |
 
-## 4. Fernbedienung und Tasten (Version 1.1.0)
+## 4. Fernbedienung und Tasten (Version 1.2.0)
 
-| Taste | Keycode | Funktion |
+Die vollständige Belegung steht in `docs/ui-and-controls.md`. Kurzfassung:
+
+| Taste | Keycode | Funktion (Wiedergabe) |
 |---|---:|---|
-| CH+ (Channel Up) | 166 | nächster Sender (mit Umlauf) |
-| CH− (Channel Down) | 167 | vorheriger Sender |
-| ▲ / ▼ (ohne Overlay) | 19 / 20 | wie CH+ / CH− (Alias, falls die Fernbedienung keine CH-Tasten hat) |
-| OK | 23 | Info-Overlay ein/aus; bei Fehleranzeige: erneut versuchen |
-| ▲ / ▼ (mit Overlay) | 19 / 20 | Puffer 1000 → 2000 → 3000 → 5000 ms (Umlauf), startet den Sender neu |
-| ◀ / ▶ (mit Overlay) | 21 / 22 | Audio-Versatz −50 / +50 ms (gespeichert) |
-| Menü (≡) | 82 | Übergabemodus TCP → UDP → direkt (gespeichert) |
-| Play/Pause | 85 | Standbild; erneut drücken = live neu starten |
-| Zurück | 4 | Overlay schließen, sonst App beenden |
+| ▲ / CH+ | 19 / 166 | nächster Sender (Gedrückthalten: schneller) |
+| ▼ / CH− | 20 / 167 | vorheriger Sender |
+| ▶ | 22 | Senderliste (rechts) |
+| ◀ / Menü | 21 / 82 | Einstellungen (links) |
+| OK | 23 | Info-Leiste ein/aus (**öffnet kein Debug-Menü mehr**) |
+| Menü lang | 82 | Debug-Overlay – nur bei aktivem Debug-Modus |
+| Play/Pause | 85 | Standbild / live neu starten |
+| Zurück | 4 | Info-Leiste schließen, sonst App beenden |
 
-Die Standard-Fernbedienung des Fire TV Stick hat **keine** Kanaltasten (Keycodes 166/167 kommen nur von Fernbedienungen/Universalfernbedienungen mit CH-Tasten, z. B. Cube-/Pro-
-Fernbedienung oder HDMI-CEC-Fernbedienungen des TVs). Jede Taste wird mit Keycode im Overlay („Taste") und im Log (`KeyDown …`) angezeigt – so lässt sich prüfen,
-welche Codes dein Gerät tatsächlich sendet. Tasten testen ohne Fernbedienung (per ADB):
+Die Standard-Fernbedienung des Fire TV Stick 4K Max meldet laut Tastenlayout auch `CHANNEL_UP/DOWN` (402/403), `VOLUME_*`, `VOLUME_MUTE` und `POWER` – welche davon bei einer App ankommen, steht in `docs/firetv-limits.md`
+(Power, Lautstärke und Home erreichen Drittanbieter-Apps laut Amazon nicht). Jede Taste, die ankommt, wird mit Keycode, Scancode und Gerätename im App-Log protokolliert (`Key`-Zeilen).
+
+Tasten testen ohne Fernbedienung (per ADB):
 ```
 tools\platform-tools\adb.exe -s 192.168.1.134:5555 shell input keyevent 166     (CH+)
 tools\platform-tools\adb.exe -s 192.168.1.134:5555 shell input keyevent 167     (CH-)
 ```
-(`input keyevent` wird vom System wie eine Tastatur-/Fernbedienungstaste zugestellt; ob die App sie annimmt, steht im Log.)
+Kernel-Ebene (welche Tasten empfängt der Fire TV überhaupt?): `scripts\key-monitor.bat`.
 
 ## 5. Tests per ADB (Start-Extras, ohne neue APK)
 
-Die App übernimmt beim Start Extras (werden gespeichert):
 ```
-adb -s 192.168.1.134:5555 shell am start -n de.thecraftedtech.hometv/.MainActivity --es transport udp --ei cacheMs 3000 --ei audioDelayMs 0 --es channel "ZDF HD"
+adb -s 192.168.1.134:5555 shell am start -n de.thecraftedtech.hometv/.MainActivity --es transport udp --ei cacheMs 3000 --ei audioDelayMs 0 --es channel "ZDF HD" --ez debug true --es epgUrl "https://…/epg.xml.gz"
 ```
-`transport`: `tcp` | `udp` | `direct` · `cacheMs`: 200–15000 · `audioDelayMs`: −2000…2000 · `channel`: Sendername oder Nummer (1–97).
-Mit `onNewIntent` wirken die Werte auch bei bereits laufender App.
+`transport`: `tcp` | `udp` | `direct` · `cacheMs`: 200–15000 · `audioDelayMs`: −2000…2000 · `channel`: Sendername oder Nummer (1–97) · `debug`: Debug-Modus ein/aus · `epgUrl`: XMLTV-URL (löst sofort eine Aktualisierung aus) ·
+`epgMap`: manuelle Zuordnung „Sendername=XMLTV-ID" (mehrere Zeilen mit `\n`). Die Werte werden gespeichert.
 
 ## 6. Log und Messwerte vom Fire TV holen
 
 ```
 scripts\pull-log.bat                    (IP aus firetv-ip.txt)
+scripts\udp-monitor.ps1                 (UDP-Verluste live, Strg+C beendet)
 ```
-holt (rein lesend) `hometv.log` (App-Log mit `STATS`-Zeile alle 10 s, Tasten, Decoder-Zeilen), den logcat und die UDP-Zähler des Geräts
-(`/proc/net/snmp`, Spalte `RcvbufErrors` = Pakete, die wegen vollem Socket-Puffer verworfen wurden) nach `tests\data\`.
-Der logcat-Ringpuffer des Fire TV hat nur 256 KiB und überschreibt Sitzungen binnen Minuten – deshalb schreibt die App ihr eigenes Log.
+- `adb pull` des App-Logs ist unter Android 11 gesperrt (*Permission denied*). `pull-log.bat` löst deshalb einen Broadcast an `LogDumpReceiver` aus (nur ab Version 1.2.0), der die letzten ≈ 150 KB des App-Logs ins logcat (Tag `HomeTVLog`) schreibt und sie nach `tests\data\firetv-hometv.log` sichert; dazu logcat und UDP-Zähler.
+- Das App-Log enthält: Start/Einstellungen, **`Key`-Zeilen**, **`TIMELINE`** je Sender-Start, **`STATS`** alle 10 s, Fehler, EPG-Ereignisse.
+- `udp-monitor.ps1` zeigt `RcvbufErrors` (lokal verworfene UDP-Pakete) je 5 s – während des Fernsehens ausführen.
 
-**So liest man eine `STATS`-Zeile** (Beispiel):
+**So liest man eine `STATS`-Zeile:**
 `rx=… lost=0 reord=0 late=0 tsCC=0/… jitter=…ms maxGap10s=…ms feedQ=…KiB feedDrop=0B dataT=…ms vlcT=…ms | vlc corrupt=0 discont=0 shown=… lostPic=0 lostAudio=0`
 
 | Muster | Bedeutung |
@@ -137,6 +139,8 @@ Der logcat-Ringpuffer des Fire TV hat nur 256 KiB und überschreibt Sitzungen bi
 | `feedDrop` > 0 | App-Puffer übergelaufen (LibVLC liest zu langsam) |
 | alles 0, aber sichtbare Fehler, `lostPic` > 0 | Decoder/Renderer (Frames zu spät) |
 | `maxGap10s` groß | Empfangsthread/Netz stockt |
+
+**So liest man eine `TIMELINE`-Zeile:** `tune=0 session=+2 PLAY_ok=+95 erstes_RTP=+118 Gate_offen=+1650 VLC_Playing=+300 Bild=+4900 (ms)` – Zeiten in ms seit dem Sender-Start; die großen Sprünge zeigen, wo die Zeit bis zum Bild bleibt.
 ## 7. App-Icon und Banner (Phase 3)
 
 **Problem in 1.0.0:** Das Banner (640×360) lag als `drawable/banner.png`, also ohne Dichte-Zuordnung (wird als 640×360 *dp* gerechnet und skaliert),
@@ -160,6 +164,6 @@ Amazon beschreibt für die Fire-TV-Oberfläche keine eigene `android:banner`-Spe
 Branding unverändert: dunkles Navy (`#0E1320`), Akzentblau (`#2E7BFF`), Schriftzug „Home TV" / „TV". Erzeugt mit `tools/make_icons.ps1` (ffmpeg; reproduzierbar).
 Vorschau: `docs/branding/icon-preview.png` (Banner · Legacy-Icon · Adaptive-Vordergrund mit gelber 66-dp-Safe-Zone).
 
-**Nicht geprüft:** Die tatsächliche Darstellung in der Fire-TV-Oberfläche. Ein Screenshot des Fire TV zeigte nur den ruhenden Startbildschirm (Hintergrundbild, keine App-Kachel
+**Nicht geprüft:** Die tatsächliche Darstellung in der Fire-TV-Oberfläche. **Update 1.2.0:** Das Icon blieb nach dem Update von 1.0 auf 1.1 laut deinem Test unverändert; Befund und Maßnahmen stehen in `docs/firetv-limits.md`, Abschnitt 2 (die APK war korrekt, der Appstore-/Launcher-Cache hat das Update-Ereignis nicht verarbeitet; Ressourcen wurden ab 1.2.0 umbenannt). Ein Screenshot des Fire TV zeigte nur den ruhenden Startbildschirm (Hintergrundbild, keine App-Kachel
 sichtbar); ich navigiere nicht ferngesteuert durch dein Menü. Bitte nach dem Update in *Apps* und *Einstellungen → Anwendungen* ansehen und mir sagen, ob Banner/Icon passen.
 Hinweis: Der Fire-TV-Launcher cached Icons mitunter; ggf. App einmal neu starten bzw. das Gerät neu starten.
