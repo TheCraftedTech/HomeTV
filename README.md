@@ -27,6 +27,8 @@ Es wird nichts umkodiert; Bild und Ton kommen unverändert von der Box.
 > Bild, Ton, Synchronisation und Senderwechsel sind dort getestet. Andere Fire-TV-Modelle und andere SAT>IP-Server sind **nicht getestet**.
 > Details: [Teststatus](#teststatus).
 
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
+
 ## Funktionen
 
 **Fernsehen**
@@ -155,8 +157,8 @@ Das App-Log liegt lokal auf dem Gerät und verlässt es nur, wenn du es selbst a
 
 ## Lizenz und Drittsoftware
 
-- **Quellcode dieses Projekts:** Noch keine Lizenz festgelegt – bis eine `LICENSE`-Datei hinzugefügt wird, gelten die gesetzlichen Standardrechte des Autors (alle Rechte vorbehalten).
-- **LibVLC** (VideoLAN) steht unter der **GNU LGPL 2.1** und ist in der APK enthalten – Hinweise und Quellen in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Quellcode, Dokumentation und Grafiken dieses Projekts:** [MIT-Lizenz](LICENSE) © 2026 Samuel Zenker – frei nutzbar, veränderbar und weitergebbar, solange der Lizenzhinweis erhalten bleibt; ohne Gewährleistung.
+- **LibVLC** (VideoLAN) steht unter der **GNU LGPL 2.1** und ist in der APK enthalten (unverändert, als Bibliothek eingebunden) – die MIT-Lizenz gilt nicht für LibVLC. Hinweise und Quellen in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - „FRITZ!Box" ist eine Marke der AVM GmbH, „Fire TV" und „Amazon" sind Marken von Amazon.com, Inc., „VLC" von VideoLAN. Dieses Projekt steht in keiner Verbindung zu diesen Unternehmen.
 
 ## Autor

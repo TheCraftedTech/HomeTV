@@ -1,5 +1,7 @@
 # Drittsoftware
 
+Der Quellcode von Home TV selbst steht unter der [MIT-Lizenz](LICENSE). Die folgenden Komponenten haben jeweils eigene Lizenzen, die von der MIT-Lizenz **nicht** berührt werden.
+
 ## LibVLC (VideoLAN)
 
 Home TV spielt den Fernsehstrom mit **LibVLC** ab und liefert die Bibliothek in der APK mit.

@@ -2,6 +2,9 @@
 
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Die Versionsnummer steht in `app/build.gradle.kts` (`versionName` / `versionCode`).
 
+## Unveröffentlicht
+- Lizenz: **MIT** (`LICENSE`).
+
 ## 1.5.0 (Code 7)
 ### Neu
 - **Favoriten-Leiste** am unteren Rand (Vorlauf-Taste ⏩): Karten mit Nummer, Name, laufender Sendung und Fortschritt; OK startet, OK lange entfernt den Favoriten.
