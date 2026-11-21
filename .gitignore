@@ -1,12 +1,20 @@
-# Lokale Werkzeuge / Umgebungen
+# ==========================================================================
+# Home TV – .gitignore
+# Grundsatz: in Git liegt nur Quellcode, Dokumentation und die veröffentlichte APK (release/).
+# Alles Lokale, Private und Erzeugte bleibt draußen.
+# ==========================================================================
+
+# --- Lokale Werkzeuge und Umgebungen (liegen im Projektordner, gehören nicht ins Repo) ---
 .venv/
 .gradle-home/
 .android-sdk/
+.android-user/
 .gradle/
+.kotlin/
 tools/platform-tools/
 tools/jdk/
 
-# Build-Zwischendateien
+# --- Build-Zwischendateien ---
 build/*
 !build/.gitkeep
 app/build/
@@ -18,7 +26,9 @@ local.properties
 *.iml
 captures/
 
-# Release-Signierung / Zugangsdaten (niemals einchecken)
+# --- Release-Signierung und Zugangsdaten (NIEMALS einchecken!) ---
+# Ohne diesen Schlüssel kann niemand ein Update installieren, das sich "wie die alte App" signiert.
+keystore/
 *.jks
 *.keystore
 keystore.properties
@@ -27,31 +37,39 @@ signing.properties
 *.secret
 credentials*.json
 
-# PersÃ¶nliche Testkonfiguration (enthÃ¤lt LAN-Adressen / Sender des Nutzers)
+# --- Persönliche Konfiguration und Messdaten (enthält LAN-Adressen, Sender, Mitschnitte) ---
 tests/data/
+firetv-ip.txt
 scripts/firetv.local.cfg
 *.local.*
 
-# GroÃŸe BinÃ¤rdateien / Mitschnitte
+# --- Protokolle und Absturzberichte (enthalten Benutzernamen, Pfade, Umgebungsvariablen) ---
+*.log
+hs_err_pid*
+replay_pid*
+*.hprof
+
+# --- Große Binärdateien und Mitschnitte ---
 *.ts
 *.mp4
 *.mkv
-*.apk
 *.aab
+# APKs sind grundsätzlich ausgeschlossen ...
+*.apk
+# ... mit EINER Ausnahme: die veröffentlichte, signierte Release-APK(s) im Ordner release/
+!release/
+!release/HomeTV-*.apk
 
-# Python
+# --- Python ---
 __pycache__/
 *.pyc
 
-# OS / Editor
+# --- Betriebssystem / Editor ---
 .DS_Store
 Thumbs.db
 .vscode/*
 !.vscode/settings.json
 
-# Lokaler ADB-Schluessel (privat!)
-.android-user/
-firetv-ip.txt
-keystore/
-local.properties
-.kotlin/
+# --- Notizen der KI-Assistenz (nicht veröffentlichen) ---
+info.markdown
+.claude/

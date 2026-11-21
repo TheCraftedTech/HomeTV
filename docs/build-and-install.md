@@ -5,7 +5,7 @@
 ```
 scripts\build-release.bat
 ```
-Ergebnis: **`build\HomeTV.apk`** (Application-ID `de.thecraftedtech.hometv`, **Version 1.2.0 / Code 3**, minSdk 22, targetSdk 34). Dieselbe Signatur wie 1.0.0/1.1.0 (gleicher Keystore, SHA-256 `cbd3c252…`, vor dem Bau gegen die installierte Version geprüft) – ein Update mit `adb install -r` behält die App-Daten.
+Ergebnis: **`build\HomeTV.apk`** (Application-ID `de.thecraftedtech.hometv`, Version laut `app/build.gradle.kts` – aktuell **1.5.0 / Code 7**, minSdk 22, targetSdk 34). Dieselbe Signatur wie alle bisherigen Versionen (gleicher Keystore, SHA-256 `cbd3c252…`, vor dem Bau gegen die installierte Version geprüft) – ein Update mit `adb install -r` behält die App-Daten.
 Das Skript setzt `JAVA_HOME` (JDK 21), `ANDROID_HOME`, `GRADLE_USER_HOME` und `ANDROID_USER_HOME` auf Ordner **im Projekt** –
 nichts wird global installiert oder verändert. Es prüft am Ende die Signatur.
 
@@ -40,8 +40,8 @@ tools\platform-tools\adb.exe -s 192.168.1.134:5555 install -r build\HomeTV.apk
 ```
 `-r` ersetzt eine vorhandene Version und **behält die App-Daten**.
 
-**Weg C – ohne ADB:** APK mit der Fire-TV-App „Downloader" laden. Dafür müsste die APK über eine URL erreichbar sein –
-dieses Projekt betreibt dafür bewusst keinen Server; Weg A/B ist einfacher.
+**Weg C – ohne ADB:** APK mit der Fire-TV-App „Downloader" laden (Adresse der APK aus dem GitHub-Release bzw. die „Raw"-Adresse der Datei in `release/`).
+Dieser Weg ist **nicht getestet**; Weg A/B ist zuverlässiger.
 
 ## 3. App starten
 
@@ -51,7 +51,7 @@ dieses Projekt betreibt dafür bewusst keinen Server; Weg A/B ist einfacher.
 Die App öffnet den zuletzt gesehenen Sender (Einstellung; sonst Das Erste HD). Bedienung: Kurzfassung in der README, vollständig in `docs/ui-and-controls.md`
 (CH+/CH− oder ▲▼ = Sender, ▶ = Senderliste, ◀ oder Menü = Einstellungen, OK = Info-Leiste, Menü lang = Debug-Overlay nur bei aktivem Debug-Modus).
 
-## 4. Was du auf dem Fernseher prüfen sollst (Version 1.2.0)
+## 4. Checkliste für einen neuen Stand (hier am Beispiel 1.2.0; sinngemäß für jede Version)
 
 **Wichtig vorab:** Version 1.1.0 lief bei dir gut – bitte zuerst prüfen, dass 1.2.0 **nicht schlechter** ist (Bild nach ≈ 5 s, Ton synchron, keine Sprünge).
 
@@ -89,4 +89,16 @@ benutzt, aber nicht verändert). Löschen (Explorer oder PowerShell, im Projekto
 Zusätzlich beendet `tools\platform-tools\adb.exe kill-server` den ADB-Hintergrunddienst (Port 5037), und
 `gradlew --stop` (oder Neustart) beendet Gradle-Daemons.
 Der Gradle-Wrapper erzeugt im Projekt nur `gradlew.bat` und `gradle\wrapper\`.
+
+## 7. Einen neuen Stand auf GitHub veröffentlichen
+
+Die signierte APK liegt im Repository unter `release/` (nur die **jeweils letzte** Version; `.gitignore` lässt dort `HomeTV-*.apk` ausdrücklich zu, alle anderen APKs bleiben ausgeschlossen).
+Jede weitere APK im Git-Verlauf vergrößert das Repository um ~45 MB – deshalb für ältere Versionen lieber **GitHub-Releases** verwenden.
+
+1. Version erhöhen: `versionCode` und `versionName` in `app/build.gradle.kts`; `CHANGELOG.md` ergänzen.
+2. Tests und Release bauen: `gradlew testDebugUnitTest`, dann `scripts\build-release.bat` (prüft am Ende die Signatur: SHA-256 muss `cbd3c252…` sein).
+3. APK nach `release\HomeTV-<Version>.apk` kopieren, die alte APK und die alte `.sha256`-Datei dort löschen, neue Prüfsumme erzeugen
+   (`certutil -hashfile release\HomeTV-<Version>.apk SHA256` bzw. `sha256sum`) und in `release/HomeTV-<Version>.apk.sha256` sowie in der README (Abschnitt „Download") eintragen.
+4. Committen und pushen (dein Teil).
+5. Auf GitHub: *Releases → Draft a new release* → Tag `v<Version>` → die APK und die `.sha256`-Datei als Dateien anhängen → Release-Text aus dem Changelog. Danach ist der Download unter *Releases* verfügbar.
 
