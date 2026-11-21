@@ -221,7 +221,9 @@ class SettingsModel(private val s: AppSettings, private val env: SettingsEnv) {
                     "Standardmäßig aus. Aktiviert technische Anzeigen; ohne diese Einstellung erscheint nie ein Debug-Overlay."),
                 SettingItem.Action("debugShow", "Debug-Overlay anzeigen", env.showDebugOverlay, { s.debugMode }),
                 SettingItem.Info("debugHow", "Bedienung", { "Menü-Taste lang drücken" }, "Nur bei aktivem Debug-Modus. Im Overlay: ▲▼ Puffer, ◀▶ Audio-Versatz."),
-                SettingItem.Info("debugLog", "Log-Datei", { env.logPath }, "Wird immer geschrieben, auch ohne Debug-Modus."),
+                SettingItem.Toggle("fileLog", "Log-Datei schreiben", { s.fileLogging }, { s.fileLogging = it },
+                    "Standardmäßig aus, damit der Speicher des Fire TV nicht unnötig verschleißt. Nur zur Fehlersuche einschalten (Abruf mit scripts\\pull-log.bat). Aus: das Log läuft nur im flüchtigen logcat."),
+                SettingItem.Info("debugLog", "Log-Datei", { env.logPath }, "Speicherort der Log-Datei (wird nur bei „Log-Datei schreiben“ = Ein beschrieben)."),
             )
         },
     )

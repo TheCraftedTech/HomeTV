@@ -156,5 +156,5 @@ Nur mit der FRITZ!Box getestet (Laptop und Fire TV, Version 1.1); eine fremde M3
 ## Debug-Modus
 Standard **aus**. Ohne ihn erscheint nie ein Debug-Overlay; die mittlere Taste (OK) öffnet nur die Info-Leiste. Eingeschaltet wird er in *Einstellungen → Debugging* (oder per ADB: `--ez debug true`).
 Geöffnet wird das Overlay dann durch **langes Drücken der Menü-Taste** (oder *Debug-Overlay anzeigen* im Menü) – eine Aktion, die im normalen Betrieb nie versehentlich passiert.
-Die technischen Logs (`hometv.log`: Start, Tasten mit Gerätename/Scancode, `TIMELINE` je Sender-Start, `STATS` alle 10 s, Fehler) werden **immer** geschrieben, unabhängig vom Debug-Modus.
+Die technischen Logs (`hometv.log`: Start, Tasten mit Gerätename/Scancode, `TIMELINE` je Sender-Start, `STATS` alle 10 s, Fehler) werden nur geschrieben, wenn *Einstellungen → Debugging → Log-Datei schreiben* **Ein** ist (Standard: Aus, um den Flash-Speicher des Fire TV zu schonen) – unabhängig vom Debug-Modus. Zum Abholen mit `scripts\pull-log.bat` zuerst einschalten, das Problem nachstellen, dann abholen.
 Nur das ausführliche VLC-Log (`-vv`, Decoder-Erkennung) läuft ausschließlich im Debug-Modus (spart CPU und überschwemmt logcat nicht); es greift ab dem nächsten Wiedergabestart.

@@ -310,6 +310,21 @@ class SettingsModelTest {
         assertEquals("Ein", item(model(s), "debug").display())
     }
 
+    @Test fun fileLoggingIsOffByDefaultAndToggles() {
+        val st = MemoryStore(); val s = AppSettings(st)
+        assertFalse("Log-Datei standardmaessig aus (Flash schonen)", s.fileLogging)
+        val t = item(model(s), "fileLog")
+        assertEquals("Aus", t.display())
+        assertTrue(t.activate())
+        assertTrue(s.fileLogging)
+        assertTrue(AppSettings(st).fileLogging)
+        assertTrue(item(model(s), "fileLog").activate())
+        assertFalse(s.fileLogging)
+        s.fileLogging = true
+        s.resetSettings()
+        assertFalse("Zuruecksetzen schaltet die Log-Datei wieder aus", s.fileLogging)
+    }
+
     @Test fun debugActionsOnlyWorkWithDebugMode() {
         val s = AppSettings(MemoryStore()); val m = model(s)
         item(m, "debugShow").activate()

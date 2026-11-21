@@ -150,9 +150,9 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
-        AppLog.init(this)
         settings = AppSettings(SharedPrefsStore(this), BuildConfig.FRITZBOX_HOST)
         handleIntent(intent)
+        AppLog.init(this, settings.fileLogging)
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         root = findViewById(R.id.root)
@@ -233,6 +233,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
 
     private fun handleIntent(intent: Intent?) {
         settings.applyIntent(intent)
+        AppLog.fileEnabled = settings.fileLogging
         requestedChannel = intent?.getStringExtra("channel")
     }
 
@@ -623,6 +624,7 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
     /** Nach "Einstellungen zurücksetzen" bzw. "Werkseinstellungen": alles neu einlesen. */
     private fun afterReset(all: Boolean) {
         playbackDirty = true                  // Puffer/Modus ... wirken beim Schliessen des Menues
+        AppLog.fileEnabled = settings.fileLogging   // nach dem Zuruecksetzen wieder aus
         armIdleTimer()
         closeDebugOverlay()
         epgRepo.clearCache()                  // die XMLTV-URL ist weg bzw. zurueckgesetzt -> alte Daten nicht weiter anzeigen
@@ -643,6 +645,11 @@ class MainActivity : Activity(), PlaybackManager.Listener, ZapController.Listene
             "host", "playlistUrl" -> reloadChannels(sourceChanged = true)
             "audio" -> playback.applyAudioDelay()
             "debug" -> { if (!settings.debugMode) closeDebugOverlay(); showMessage(if (settings.debugMode) "Debug-Modus an – Menü-Taste lang drücken. VLC-Log ab nächstem Wiedergabestart." else "Debug-Modus aus") }
+            "fileLog" -> {
+                AppLog.fileEnabled = settings.fileLogging
+                AppLog.i(tag, "Log-Datei schreiben: ${if (settings.fileLogging) "an" else "aus"}")   // bei "aus" nur noch logcat
+                showMessage(if (settings.fileLogging) "Log-Datei wird geschrieben" else "Log-Datei aus")
+            }
             "epgUrl" -> { if (settings.epgActive) { epgRepo.refresh(force = true); showMessage("Programmführer wird geladen …") } }
             "epgOn" -> if (settings.epgActive) epgRepo.refreshIfStale()
             "epgDays" -> Unit

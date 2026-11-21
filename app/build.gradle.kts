@@ -20,8 +20,8 @@ android {
         applicationId = "de.thecraftedtech.hometv"
         minSdk = 22          // Fire OS 5 (Android 5.1) und neuer
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.5.0"
+        versionCode = 8
+        versionName = "1.6.0"
 
         buildConfigField("String", "FRITZBOX_HOST", "\"$fritzboxHost\"")
 

@@ -223,6 +223,11 @@ class AppSettings(private val store: KeyValueStore, val defaultHost: String = DE
         get() = store.getBoolean("debugMode", false)
         set(v) = store.putBoolean("debugMode", v)
 
+    /** Log-Datei (hometv.log) schreiben? Standardmaessig aus, um den Flash-Speicher des Fire TV zu schonen. */
+    var fileLogging: Boolean
+        get() = store.getBoolean("fileLogging", false)
+        set(v) = store.putBoolean("fileLogging", v)
+
     /** Uebernimmt Test-Extras eines Start-Intents (nur wenn vorhanden). */
     fun applyIntent(intent: Intent?) {
         intent ?: return
@@ -230,6 +235,7 @@ class AppSettings(private val store: KeyValueStore, val defaultHost: String = DE
         if (intent.hasExtra("audioDelayMs")) audioDelayMs = intent.getIntExtra("audioDelayMs", 0)
         Transport.fromKey(intent.getStringExtra("transport"))?.let { transport = it }
         if (intent.hasExtra("debug")) debugMode = intent.getBooleanExtra("debug", false)
+        if (intent.hasExtra("fileLog")) fileLogging = intent.getBooleanExtra("fileLog", false)
         intent.getStringExtra("fritzboxHost")?.let { fritzboxHost = it }
         intent.getStringExtra("playlistUrl")?.let { playlistUrl = it }
         intent.getStringExtra("epgUrl")?.let { epgUrl = it }

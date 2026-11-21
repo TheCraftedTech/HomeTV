@@ -5,6 +5,11 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Di
 ## Unveröffentlicht
 - Lizenz: **MIT** (`LICENSE`).
 
+## 1.6.0 (Code 8)
+### Neu
+- **Log-Datei schreiben** (*Einstellungen → Debugging*): schaltet das Schreiben von `hometv.log` ein/aus. **Standardmäßig aus**, damit der Flash-Speicher des Fire TV nicht durch Dauerschreiben verschleißt (vorher wurde alle 10 s eine `STATS`-Zeile u. a. immer geschrieben). Aus: das Log läuft nur noch im flüchtigen logcat. Ein: wie bisher (Abruf mit `scripts\pull-log.bat`). „Einstellungen zurücksetzen" schaltet es wieder aus.
+- Test-Extra für ADB: `--ez fileLog true|false` beim Start.
+
 ## 1.5.0 (Code 7)
 ### Neu
 - **Favoriten-Leiste** am unteren Rand (Vorlauf-Taste ⏩): Karten mit Nummer, Name, laufender Sendung und Fortschritt; OK startet, OK lange entfernt den Favoriten.

@@ -5,7 +5,7 @@
 ```
 scripts\build-release.bat
 ```
-Ergebnis: **`build\HomeTV.apk`** (Application-ID `de.thecraftedtech.hometv`, Version laut `app/build.gradle.kts` – aktuell **1.5.0 / Code 7**, minSdk 22, targetSdk 34). Dieselbe Signatur wie alle bisherigen Versionen (gleicher Keystore, SHA-256 `cbd3c252…`, vor dem Bau gegen die installierte Version geprüft) – ein Update mit `adb install -r` behält die App-Daten.
+Ergebnis: **`build\HomeTV.apk`** (Application-ID `de.thecraftedtech.hometv`, Version laut `app/build.gradle.kts` – aktuell **1.6.0 / Code 8**, minSdk 22, targetSdk 34). Dieselbe Signatur wie alle bisherigen Versionen (gleicher Keystore, SHA-256 `cbd3c252…`, vor dem Bau gegen die installierte Version geprüft) – ein Update mit `adb install -r` behält die App-Daten.
 Das Skript setzt `JAVA_HOME` (JDK 21), `ANDROID_HOME`, `GRADLE_USER_HOME` und `ANDROID_USER_HOME` auf Ordner **im Projekt** –
 nichts wird global installiert oder verändert. Es prüft am Ende die Signatur.
 
